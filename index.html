@@ -6,7 +6,7 @@
   <title>网页蓝牙文字投递助手</title>
   <!-- 引入外部样式表与字体 -->
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
 
@@ -37,14 +37,14 @@
       <button class="btn btn-clear" onclick="clearInput()">清空</button>
     </div>
 
-    <!-- 历史记录 -->
-    <div class="history-section">
-      <div class="history-header">已发送历史</div>
-      <div id="history-list" class="history-list"></div>
+    <!-- 剪贴板同步按钮组 -->
+    <div class="clipboard-group">
+      <button class="btn btn-pull" onclick="getClipboardFromServer()">拉取剪贴板</button>
+      <button class="btn btn-push" onclick="sendClipboardToServer()">推送剪贴板</button>
     </div>
   </div>
 
   <!-- 引入核心 JavaScript 逻辑 -->
-  <script src="app.js"></script>
+  <script src="static/app.js"></script>
 </body>
 </html>

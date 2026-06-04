@@ -7,30 +7,32 @@ let connectedDevice = null;       // 授权设备句柄
 let reconnectTimer = null;        // 重连定时器句柄
 let connectionStartTime = 0;      // 记录连接建立的时间戳
 let isComposing = false;          // 中文拼音组合输入状态
+let pullBuffer = "";              // 全局拉取接收缓冲区
 
 const statusBadge = document.getElementById("status");
 const connectBtn = document.getElementById("connect-btn");
 const textInput = document.getElementById("text-input");
 const btnGroup = document.getElementById("btn-group");
 const sendBtn = document.getElementById("send-btn");
-const historyList = document.getElementById("history-list");
 const instantSwitch = document.getElementById("instant-switch");
 
-// 发送日志到 PC 端
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 发送日志到 PC 端（通过蓝牙通道）
 async function sendLog(type, message, errorDetail = null) {
-  console.log(`[${type}] ${message}`, errorDetail || "");
-  try {
-    const payload = { type, message };
-    if (errorDetail) {
-      payload.error = errorDetail.stack || errorDetail.toString();
+  let logMsg = message;
+  if (errorDetail) {
+    logMsg += " | " + (errorDetail.stack || errorDetail.toString());
+  }
+  console.log(`[${type}] ${logMsg}`);
+  if (writeCharacteristic) {
+    try {
+      const encoder = new TextEncoder();
+      const dataBytes = encoder.encode(`L:${type}:${logMsg}`);
+      await writeCharacteristic.writeValueWithoutResponse(dataBytes);
+    } catch (e) {
+      console.error("蓝牙日志上报失败", e);
     }
-    await fetch('/log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-  } catch (e) {
-    console.error("日志上报失败", e);
   }
 }
 
@@ -96,6 +98,35 @@ async function handleConnect() {
   }
 }
 
+// 处理接收到的特征通知
+async function handleNotifications(event) {
+  const value = event.target.value;
+  const decoder = new TextDecoder();
+  const text = decoder.decode(value);
+  
+  if (text.startsWith("R:pull:start")) {
+    pullBuffer = "";
+  } else if (text.startsWith("R:pull:data:")) {
+    pullBuffer += text.slice(12);
+  } else if (text.startsWith("R:pull:end")) {
+    textInput.value = pullBuffer;
+    textInput.focus();
+    try {
+      const blob = new Blob([pullBuffer], { type: "text/plain" });
+      const clipboardItem = new ClipboardItem({ "text/plain": blob });
+      await navigator.clipboard.write([clipboardItem]);
+      await sendLog("INFO", "拉取电脑剪贴板成功，已同步至手机剪贴板");
+    } catch (err) {
+      try {
+        await navigator.clipboard.writeText(pullBuffer);
+        await sendLog("INFO", "拉取电脑剪贴板成功，已通过 writeText 写入手机剪贴板");
+      } catch (innerErr) {
+        await sendLog("WARNING", "剪贴板拉取成功并展示，但同步至手机剪贴板失败（浏览器权限限制）: " + innerErr.message);
+      }
+    }
+  }
+}
+
 // 执行底层的 GATT 连接与特征绑定
 async function connectToGatt(device) {
   try {
@@ -107,6 +138,11 @@ async function connectToGatt(device) {
     
     await sendLog("INFO", "Service 已就绪，获取特征值 (Characteristic)...");
     writeCharacteristic = await service.getCharacteristic(CHAR_UUID);
+    
+    // 订阅特征通知以实现双向接收
+    await writeCharacteristic.startNotifications();
+    writeCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+    await sendLog("INFO", "已成功订阅蓝牙特征通知，实现双向通信。");
     
     // 发送连接就绪指令，用于通知服务端显示连接日志并建立 session
     try {
@@ -146,7 +182,6 @@ async function onDisconnected() {
   // 开启静默重连
   startReconnect();
 }
-
 
 // 循环尝试自动重连
 async function startReconnect() {
@@ -230,7 +265,6 @@ async function sendText() {
   
   try {
     await sendPayload("T", text + "\n");
-    addToHistory(text);
     textInput.value = "";
     textInput.focus();
   } catch (error) {
@@ -265,7 +299,6 @@ function toggleInstantMode() {
 }
 
 // 即时模式事件绑定
-
 textInput.addEventListener("compositionstart", () => {
   isComposing = true;
 });
@@ -331,32 +364,49 @@ textInput.addEventListener("keydown", async (event) => {
   }
 });
 
-// 发送历史渲染
-function addToHistory(text) {
-  const item = document.createElement("div");
-  item.className = "history-item";
-  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  item.innerHTML = `
-    <span class="history-item-text">${escapeHtml(text)}</span>
-    <span style="font-size:10px;color:var(--text-muted)">${timeStr}</span>
-  `;
-  item.onclick = () => {
-    textInput.value = text;
-    textInput.focus();
-  };
-  if (historyList.firstChild) {
-    historyList.insertBefore(item, historyList.firstChild);
-  } else {
-    historyList.appendChild(item);
+// 剪贴板拉取（通过蓝牙）
+async function getClipboardFromServer() {
+  if (!writeCharacteristic) {
+    alert("蓝牙未连接！");
+    return;
   }
-  while (historyList.children.length > 5) {
-    historyList.removeChild(historyList.lastChild);
+  try {
+    await sendPayload("C", "pull:request");
+    await sendLog("INFO", "已通过蓝牙发送剪贴板拉取请求");
+  } catch (err) {
+    console.error("剪贴板拉取失败:", err);
+    await sendLog("ERROR", "剪贴板拉取失败", err);
   }
 }
 
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+// 剪贴板推送（通过蓝牙）
+async function sendClipboardToServer() {
+  if (!writeCharacteristic) {
+    alert("蓝牙未连接！");
+    return;
+  }
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) {
+      alert("手机剪贴板为空！");
+      return;
+    }
+    
+    await sendLog("INFO", `开始通过蓝牙推送剪贴板，总长度: ${text.length}`);
+    await sendPayload("C", "push:start");
+    await sleep(15);
+    
+    const chunkSize = 200;
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const chunk = text.substring(i, i + chunkSize);
+      await sendPayload("C", `push:data:${chunk}`);
+      await sleep(15);
+    }
+    
+    await sendPayload("C", "push:end");
+    await sendLog("INFO", "剪贴板数据通过蓝牙推送完毕");
+  } catch (err) {
+    console.error("剪贴板推送失败:", err);
+    await sendLog("ERROR", "剪贴板推送失败", err);
+  }
 }
