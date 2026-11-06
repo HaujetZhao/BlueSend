@@ -35,7 +35,7 @@ uv run python server.py
 如果不想走 GitHub Pages，也可以在本地起 HTTPS 服务（Web Bluetooth 要求安全上下文）：
 
 ```powershell
-uv run python serve_web.py
+uv run --project pc python serve_web.py
 # 手机访问 https://<电脑局域网IP>:8443 ，需要信任一次自签证书
 ```
 

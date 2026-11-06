@@ -1,6 +1,6 @@
 # 交接文档：手机与电脑的 BLE 通道
 
-更新于 2026-11-07。这份文档给下一个上下文窗口用，读完就能接着干。
+更新于 2026-11-07 深夜。明天（11-08）在这个仓库继续干，读完这份就能接上。
 
 ## 一、项目是什么
 
@@ -8,7 +8,9 @@
 
 技术路线已定：**电脑做 BLE 外设，手机开网页连上去**。选 BLE 而不是 RFCOMM，唯一的理由是手机端能用网页——不用装 App、不用过应用商店；代价是 Windows 侧只能自己用 WinRT 写 GATT Server（没有成熟的高层库）。
 
-血缘：代码最早在 `E:\repos\ble` 里成形（原生 Android App 与 Web Bluetooth 网页两条路都试过，原生 App 那条卡在「30 秒自动断开」），2026-11-07 合并回本仓库；原生 App 的代码留在这个仓库的 `.trash/android-legacy-2026-11-07/`，`.trash/` 不入库。
+**仓库现状**：`E:\repos\Bluetooth-Input`，`main` 分支，`origin` 指向 GitHub。最新提交 `17b4e60`，**尚未 push**。
+
+血缘：代码最初在 `E:\repos\ble` 里成形（那里还试过原生 Android App 路线，卡在「30 秒自动断开」），2026-11-07 合并进本仓库。`E:\repos\ble` 现在是冻结的旧副本，没有价值，可以随时丢弃；原生 App 源码在本仓库的 `.trash/android-legacy-2026-11-07/`（`.trash/` 不入库）。
 
 ## 二、架构
 
@@ -31,7 +33,7 @@ E:\repos\Bluetooth-Input\
 ├── index.html                  手机端页面
 ├── static\app.js               网页逻辑：连接、帧编解码、MTU 切片、即时输入、剪贴板
 ├── static\style.css
-├── static\{cert,key}.pem       自签证书，手机需信任一次
+├── static\{cert,key}.pem       自签证书，本地托管时用
 ├── serve_web.py                HTTPS 静态服务（纯标准库）
 ├── pc\
 │   ├── server.py               WinRT GATT Server：广播、写请求同步应答、JSON 分发、按 MTU 分片通知
@@ -39,23 +41,35 @@ E:\repos\Bluetooth-Input\
 │   ├── protocol.py             UUID 常量
 │   ├── clipboard.py            Win32 剪贴板读写（ctypes，零依赖）
 │   ├── pyproject.toml          uv 依赖（winrt-*、keyboard）
+│   ├── uv.lock
 │   └── tests\test_frame_codec.py
-└── .trash\                     废弃文件的暂存区，可随时手动清掉
+├── bt_serial_receiver.py       早期 RFCOMM 串口方案，保留备用，未接入当前架构
+└── .trash\                     废弃文件暂存区，可随时手动清掉
 ```
 
 ## 四、怎么跑
 
-```bash
-# 电脑端（一个终端）
-cd pc && uv run python server.py
+先从 PowerShell 确认没有僵尸实例——**多实例会互相抢广播，症状极难认**：
 
-# 网页服务（另一个终端，只在本地托管时需要；日常用 GitHub Pages 就够）
-uv run python serve_web.py   # 会打印手机访问用的 https://<局域网IP>:8443
+```powershell
+Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object ProcessId,CommandLine
 ```
 
-手机上打开该地址（首次要信任自签证书）→ 点「扫描连接」→ 选中电脑。之后打字、点剪贴板按钮即可。
+再启动电脑端：
 
-日志在 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。
+```powershell
+cd E:\repos\Bluetooth-Input\pc
+uv run python server.py
+```
+
+看到 `广播状态：Started`（数值 2）就是在等手机连接。日志同时写 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。
+
+手机端两条路：
+
+- **GitHub Pages**：`https://haujetzhao.github.io/Bluetooth-Input/`。注意线上此刻还是旧页面（新的没 push），要么先 push，要么用下面这条
+- **本地托管**：`uv run --project pc python serve_web.py`，手机开 `https://<电脑局域网IP>:8443`，首次要信任一次自签证书
+
+连上后点「扫描连接」→ 选中电脑。页面状态栏下面那行小字会写「已连接（第 N 段）」，断开时写原因和上一段存活时长。
 
 ## 五、踩过的坑
 
@@ -72,7 +86,9 @@ because WinRT does not await what it returns
 
 上一代代码在 WinRT 回调里 `get_deferral()`，把活儿丢回 asyncio 线程，再在那边 `complete()`。跨线程完成会抛异常，而异常被吞在 `finally` 里，于是 Windows 永远在等那次写请求——ATT 事务 30 秒超时，整条链路断开。
 
-现在的写法：写请求在回调线程上同步 `get_request_async().get()` 取到值、同步 `respond()`，只把字节投递给 asyncio 队列，业务处理才回到 asyncio 线程。
+现在的写法：写请求在回调线程上同步 `get_request_async().get()` 取到值、同步 `respond()`，只把字节投递给 asyncio 队列，业务处理才回到 asyncio 线程。原则是**跨线程只传数据，不传控制权**。
+
+（诚实备注：这条根因是「最强嫌疑 + 移除后不复现」，没有逐帧证明过。旧仓库的异常被吞了，没留现场。）
 
 ### 3. `get_request_async()` 不能直接 `get_results()`
 
@@ -102,7 +118,13 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 ### 8. 多个 `server.py` 进程同时跑会抢广播
 
-调试中遇到过：残留进程让新进程广播失败。测试前先确认没有僵尸进程。
+`uv run` 外面包了一层，停后台任务只杀到包装进程，真正的 python 子进程还活着。两个进程用同一个 Service UUID 各自注册、各自广播，症状是 `GATT Error Unknown`、刚连就断。启动前先按第四节的命令查一遍。
+
+### 9. 同一页面开多个标签页也会互抢
+
+每个标签页是一路独立的 Web Bluetooth 客户端，会各自去抢同一台设备。现在页面加载时会通过 `BroadcastChannel` 探测同伴并提示「请只保留一个」。
+
+第 8、9 条合起来造成过一次很迷惑的「9 秒断一次」：电脑端以为没人订阅 → 心跳被跳过 → 网页看门狗到点判死。看上去像协议 bug，实际是抢连接的连锁反应。
 
 ## 六、环境事实
 
@@ -111,36 +133,59 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 | 手机 | vivo V2352A，Android 16（SDK 36），配对的电脑是 `DESKTOP-2QELB5P` |
 | Python | 3.14.7，uv 管理，`pc/.venv` |
 | 电脑蓝牙 | Intel Wi-Fi 7 BE200，外设角色可用 |
-| 浏览器 | Android Chrome（Web Bluetooth 支持 `writeValueWithResponse`；`maxWriteWithoutResponseSize` 要到 Chrome 157） |
+| 浏览器 | Android Chrome（支持 `writeValueWithResponse`；`maxWriteWithoutResponseSize` 要到 Chrome 157） |
+| adb | SDK 里的 37.0.0：`"$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"`，Git Bash 下加 `MSYS_NO_PATHCONV=1` 前缀 |
 
-## 七、状态与待办
+## 七、仓库状态与待办
 
-**已实测通过（2026-11-07）：**
+**已验证通过（2026-11-07 实测）：**
 
 - 网页经 HTTPS 打开、扫描到电脑并连上
 - 长中文文本完整上屏，未复现 `UnicodeDecodeError`
 - 连接持续数分钟不中断，心跳按 3 秒稳定投递，通知按 514 字节分片送达
 - 即时输入（逐字上屏、退格、回车）与剪贴板推送、拉取两个方向
-- 原「30 秒断开」未复现（那套 deferral 跨线程写法已从流程里彻底移除）
+- 原「30 秒断开」未复现
+- `cd pc && uv run pytest` → 7 passed
 
-**已定位的环境型故障（不是协议问题）：**
+**明天的优先级：**
 
-- 同一页面开多个标签页 + 残留多个 `server.py` 实例 → 多路客户端抢同一台设备，表现为 `GATT Error Unknown`、刚连就断、心跳被跳过、9 秒看门狗误杀。现在网页端开第二份页面会直接提示，电脑端启动前也应确认没有僵尸实例
-
-**待办：**
-
-1. 长时间挂机测试（十几分钟以上、跨锁屏）
-2. 断开后的自动重连实测（杀掉电脑端进程验证）
-3. 后续演进再议：GUI、多条历史、文件传输
+1. 决定是否 push 到 GitHub（push 之后 GitHub Pages 才会换成新页面）
+2. 长时间挂机（十几分钟以上、跨锁屏）看是否稳
+3. 重连实测：杀掉电脑端进程，看网页是否 9 秒内察觉并在电脑重启后自动接回
+4. 之后才谈演进：GUI、历史记录、文件传输
 
 **已知取舍：**
 
 - 网页在后台会被 Chrome 挂起，蓝牙可能被掐；回到前台会自动重连
 - 剪贴板读写在浏览器里受权限限制，`navigator.clipboard.writeText` 失败时内容会留在输入框里，不影响使用
 
-## 八、给下一个上下文窗口的提醒
+## 八、调试手法
 
+**看服务端日志**：`pc/logs/ble-<时间戳>.log`。健康状态下应该只有零星三行：
+
+```
+订阅变化：当前 1 个订阅客户端
+通知分片上限：514 字节
+[网页] 已连接（第 1 段）
+```
+
+心跳正常情况下**不刷日志**，只在投递状态变化时记一行 `心跳投递：正常 / 没有订阅客户端`。
+
+**看手机页面的控制台**（比让用户口述强得多，省来回）：
+
+```bash
+ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
+MSYS_NO_PATHCONV=1 "$ADB" forward tcp:9222 localabstract:chrome_devtools_remote
+curl -s http://127.0.0.1:9222/json      # 列出标签页，拿 webSocketDebuggerUrl
+```
+
+然后用 `uv run --with websocket-client python` 连上去发 `Runtime.enable` + `Runtime.evaluate`，就能读到页面里的 `status`、`event-log` 文本和 console 输出。连 websocket 时记得 `suppress_origin=True`，否则被 403。用完 `adb forward --remove-all` 收尾。
+
+## 九、协作约定
+
+- 中文、全角标点；代码块与行内代码内保持原样
+- 提交信息不加 `Co-Authored-By`
+- 不直接删文件，要删就移到项目内 `.trash/`
+- 界面观感由用户本人判断（过渡顺不顺、布局观感），我只负责客观断言：日志、编译、DOM/样式读数
 - 改协议时 `protocol.md`、`pc/server.py`、`static/app.js` 三处必须同步
-- 用户偏好中文、全角标点；提交信息不加 `Co-Authored-By`
-- 界面观感由用户本人判断，我只负责客观日志与编译验证
-- 不要直接删文件，要删就移到项目内 `.trash/`
+- 独立的搜索、多文件改动、机械核对优先派 subagent，主会话做编排与审阅
