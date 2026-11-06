@@ -52,6 +52,16 @@ body {
   margin-bottom: 12px;
 }
 
+/* 链路事件行：小字、低调，但断连时有据可查 */
+.event-log {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  min-height: 14px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
 /* 左侧状态与扫描连接 */
 .left-controls {
   display: flex;

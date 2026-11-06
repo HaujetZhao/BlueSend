@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+.pytest_cache/
+.trash/
+pc/logs/
+.idea/
+.DS_Store

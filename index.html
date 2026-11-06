@@ -3,9 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>网页蓝牙文字投递助手</title>
-  <!-- 引入外部样式表与字体 -->
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+  <title>手机 ↔ 电脑 蓝牙通道</title>
   <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
@@ -15,7 +13,7 @@
     <div class="top-bar">
       <div class="left-controls">
         <span id="status" class="status-badge disconnected">未连接</span>
-        <button id="connect-btn" class="btn-connect" onclick="handleConnect()">扫描连接</button>
+        <button id="connect-btn" class="btn-connect">扫描连接</button>
       </div>
       
       <!-- 即时输入 Switch 开关 -->
@@ -28,8 +26,11 @@
       </div>
     </div>
 
+    <!-- 最近一次链路事件（连接/断开/重连），同时会补发到电脑端日志 -->
+    <div id="event-log" class="event-log">尚未连接</div>
+
     <!-- 输入区 -->
-    <textarea id="text-input" placeholder="连接蓝牙后可开始输入..." disabled></textarea>
+    <textarea id="text-input" placeholder="连接蓝牙后可开始输入..."></textarea>
 
     <!-- 经典模式发送/清空按钮组（即时发送模式下会自动隐藏） -->
     <div id="btn-group" class="button-group" style="display: none;">
@@ -39,8 +40,8 @@
 
     <!-- 剪贴板同步按钮组 -->
     <div class="clipboard-group">
-      <button class="btn btn-pull" onclick="getClipboardFromServer()">拉取剪贴板</button>
-      <button class="btn btn-push" onclick="sendClipboardToServer()">推送剪贴板</button>
+      <button class="btn btn-pull" onclick="pullClipboard()">拉取剪贴板</button>
+      <button class="btn btn-push" onclick="pushClipboard()">推送剪贴板</button>
     </div>
   </div>
 

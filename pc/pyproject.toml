@@ -1,0 +1,18 @@
+[project]
+name = "bluetooth-input-pc"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "keyboard>=0.13.5",
+    "winrt-runtime>=3.2",
+    "winrt-Windows.Devices.Bluetooth>=3.2",
+    "winrt-Windows.Devices.Bluetooth.GenericAttributeProfile>=3.2",
+    "winrt-Windows.Foundation>=3.2",
+    "winrt-Windows.Storage.Streams>=3.2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
