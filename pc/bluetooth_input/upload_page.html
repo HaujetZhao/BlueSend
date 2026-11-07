@@ -53,41 +53,42 @@
     font-weight: 600;
   }
 
-  .hint {
-    margin-top: 6px;
-    font-size: 11.5px;
-    line-height: 1.5;
-    color: var(--text-muted);
-  }
-
   .targets {
     display: flex;
-    gap: 10px;
+    gap: 22px;
     margin-top: 14px;
   }
 
   .target {
-    flex: 1;
-    height: 40px;
-    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 0;
+    border: 0;
+    background: none;
     font: inherit;
     font-size: 13px;
-    font-weight: 600;
     color: var(--text-muted);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.09);
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition: color 0.15s ease;
   }
 
-  .target:hover {
-    background: rgba(255, 255, 255, 0.09);
+  .target::before {
+    content: '';
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.28);
+    transition: border-color 0.15s ease, background 0.15s ease;
   }
 
   .target.active {
-    color: #aab3ff;
-    background: rgba(99, 102, 241, 0.16);
-    border-color: rgba(99, 102, 241, 0.45);
+    color: var(--text-color);
+  }
+
+  .target.active::before {
+    border-color: var(--primary-color);
+    background: radial-gradient(circle, var(--primary-color) 0 4px, transparent 4.5px);
   }
 
   .pick {
@@ -192,7 +193,6 @@
 <body>
 <main>
   <h1>发送文件到电脑</h1>
-  <p class="hint">文件会保存到电脑上你选的位置。可以多选，按顺序逐个上传。</p>
 
   <div class="targets">
     <button type="button" class="target" data-target="desktop">桌面</button>
