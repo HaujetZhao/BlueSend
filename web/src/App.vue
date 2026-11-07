@@ -12,10 +12,14 @@ let composing = false;
 const hasTriedConnect = ref(false);
 // 测速期间两颗按钮都锁住：一次只跑一个方向。
 const benching = ref(false);
-// 电脑下发的上传入口（连接作用域）与当前选中的候选。候选通常只有一个；
-// 多网卡时第一个是默认路由所在网卡，打不开再由「换个入口」手动切换。
+// 文件上传入口（连接作用域）。电脑会下发所有候选地址，手机逐个探测，用第一个
+// 通的。探测是 HTTPS 页面发往局域网 HTTP 的请求：Chrome 用「本地网络」权限放行，
+// 请求需要声明 targetAddressSpace，授权后即豁免混合内容拦截。
 const uploadLinks = ref([]);
-const uploadSlot = ref(0);
+const uploadUrl = ref(null);
+const uploadPerm = ref('unsupported');
+const uploadBusy = ref(false);
+const uploadBlocked = ref(false);
 
 const {
   status,
@@ -32,14 +36,24 @@ const {
   onReceiveProgress: showReceiveProgress,
   onNet: (hosts) => {
     uploadLinks.value = hosts;
-    uploadSlot.value = 0;
+    uploadUrl.value = null;
+    uploadBusy.value = false;
+    uploadBlocked.value = false;
+    if (hosts.length) prepareUpload(hosts);
   },
 });
 
 const statusLabel = computed(
   () => ({ disconnected: '未连接', connecting: '连接中', connected: '已连接' })[status.value],
 );
-const canUpload = computed(() => connected.value && uploadLinks.value.length > 0);
+// 已授权时探测完全自动，探不到可达入口就禁用按钮；没授权时按钮必须可点，
+// 那次点击才是触发权限提示的用户手势。
+const canUpload = computed(
+  () => connected.value
+    && uploadLinks.value.length > 0
+    && !uploadBusy.value
+    && !uploadBlocked.value,
+);
 const placeholder = computed(() => {
   if (status.value === 'connecting') return '正在重新连接，请稍候…';
   if (status.value === 'connected') {
@@ -178,18 +192,101 @@ function pullClipboard() {
   send({ t: 'pull' });
 }
 
-// 打开电脑托管的上传页。必须在点击回调里同步调用 window.open，异步打开会被
-// 浏览器当弹窗拦截。传完的结果不会回到这里——上传页自己显示进度。
-function openUpload(next) {
+const LOCAL_NETWORK_PERMISSION = 'local-network';
+const PROBE_TIMEOUT_MS = 2500;
+// 首次探测会弹「本地网络」授权框，用户可能要看几秒，别被普通超时打断。
+const PROBE_PROMPT_TIMEOUT_MS = 20000;
+
+async function permissionState() {
+  try {
+    const status = await navigator.permissions.query({
+      name: LOCAL_NETWORK_PERMISSION,
+    });
+    return status.state;
+  } catch {
+    // 老浏览器不认识这个权限名，也就没有豁免混合内容的办法。
+    return 'unsupported';
+  }
+}
+
+// 收到 net 后：只有已经授权时才自动探测，并据此决定按钮可不可用。
+// 权限还是 prompt 时不能静默探测（浏览器会拒绝），留给用户点击去触发。
+async function prepareUpload(hosts) {
+  uploadPerm.value = await permissionState();
+  if (uploadLinks.value !== hosts || uploadPerm.value !== 'granted') return;
+  uploadBusy.value = true;
+  const url = await firstReachable(hosts, PROBE_TIMEOUT_MS);
+  if (uploadLinks.value !== hosts) return;
+  uploadBusy.value = false;
+  uploadUrl.value = url;
+  uploadBlocked.value = !url;
+}
+
+// 打开电脑托管的上传页。探测是异步的，先同步开一个空标签页占位，否则
+// window.open 会被浏览器当弹窗拦截。传完的结果不会回到这里。
+async function openUpload() {
   const hosts = uploadLinks.value;
   if (!hosts.length) return;
-  if (next) uploadSlot.value = (uploadSlot.value + 1) % hosts.length;
-  const opened = window.open(hosts[uploadSlot.value], '_blank');
-  note(
-    opened
-      ? `已打开上传页（入口 ${uploadSlot.value + 1}/${hosts.length}）`
-      : '浏览器拦截了新标签页，请允许弹窗后重试',
-  );
+  const popup = window.open('about:blank', '_blank');
+  if (!popup) {
+    note('浏览器拦截了新标签页，请允许弹窗后重试');
+    return;
+  }
+  note('正在探测入口…');
+  let url = uploadUrl.value;
+  if (!url) {
+    if (uploadPerm.value === 'unsupported') {
+      // 无法探测的浏览器只能用默认路由那个地址，失败就失败。
+      url = hosts[0];
+    } else {
+      const timeout = uploadPerm.value === 'granted'
+        ? PROBE_TIMEOUT_MS
+        : PROBE_PROMPT_TIMEOUT_MS;
+      url = await firstReachable(hosts, timeout);
+    }
+  }
+  if (!url) {
+    popup.close();
+    note(
+      uploadPerm.value === 'denied'
+        ? '文件上传需要本地网络权限，请在浏览器网站设置里允许后重试'
+        : '没有入口能连通，请确认手机与电脑在同一局域网',
+    );
+    return;
+  }
+  uploadUrl.value = url;
+  uploadBlocked.value = false;
+  popup.location.href = url;
+  note('已打开上传页');
+}
+
+// 用来探测的请求走本机的 /ping，token 原样带上。targetAddressSpace 让 Chrome
+// 在解析前就知道目标是局域网，用户授权后豁免混合内容拦截。
+async function reachable(pageUrl, timeoutMs) {
+  const probe = new URL(pageUrl);
+  probe.pathname = '/ping';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(probe, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      targetAddressSpace: 'local',
+      signal: controller.signal,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function firstReachable(hosts, timeoutMs) {
+  for (const url of hosts) {
+    if (await reachable(url, timeoutMs)) return url;
+  }
+  return null;
 }
 
 async function pushClipboard() {
@@ -394,26 +491,6 @@ onUnmounted(() => tabChannel.close());
       </button>
     </div>
 
-    <div class="file-group">
-      <button class="btn-file" :disabled="!canUpload" @click="openUpload(false)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-          <path d="M12 18v-6" />
-          <path d="M9 15l3-3 3 3" />
-        </svg>
-        发送文件
-      </button>
-      <button
-        v-if="uploadLinks.length > 1"
-        class="btn-alt-host"
-        :disabled="!connected"
-        @click="openUpload(true)"
-      >
-        换个入口
-      </button>
-    </div>
-
     <div class="bench-group">
       <button class="btn-bench" :disabled="!connected || benching" @click="benchUplink">
         上行测速
@@ -421,6 +498,10 @@ onUnmounted(() => tabChannel.close());
       <span class="bench-sep"></span>
       <button class="btn-bench" :disabled="!connected || benching" @click="benchDownlink">
         下行测速
+      </button>
+      <span class="bench-sep"></span>
+      <button class="btn-bench" :disabled="!canUpload" @click="openUpload">
+        发送文件
       </button>
     </div>
 

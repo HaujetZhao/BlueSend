@@ -149,11 +149,17 @@ def _make_handler(directory: Path, token: str) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(body)
 
         def do_GET(self) -> None:
-            if urlparse(self.path).path != "/":
+            path = urlparse(self.path).path
+            if path not in ("/", "/ping"):
                 self.send_error(404)
                 return
             if not self._authorized():
                 self.send_error(403)
+                return
+            if path == "/ping":
+                # 手机主页面用它探测这个入口是否可达，不需要任何内容。
+                self.send_response(204)
+                self.end_headers()
                 return
             body = PAGE_PATH.read_bytes()
             self.send_response(200)

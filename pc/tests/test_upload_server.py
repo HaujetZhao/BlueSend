@@ -71,6 +71,13 @@ def test_get_returns_page_with_token(service):
         assert "发送文件到电脑".encode() in response.read()
 
 
+def test_ping_returns_204(service):
+    url = f"http://127.0.0.1:{service.port}/ping?t={service.token}"
+    with urllib.request.urlopen(url, timeout=5) as response:
+        assert response.status == 204
+        assert response.read() == b""
+
+
 @pytest.mark.parametrize("token", ["wrong", "%E4%B8%AD", "%FF"])
 def test_get_rejects_wrong_token(service, token):
     url = f"http://127.0.0.1:{service.port}/?t={token}"
