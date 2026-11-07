@@ -8,7 +8,7 @@
 
 技术路线已定：**电脑做 BLE 外设，手机开网页连上去**。选 BLE 而不是 RFCOMM，唯一的理由是手机端能用网页——不用装 App、不用过应用商店；代价是 Windows 侧只能自己用 WinRT 写 GATT Server（没有成熟的高层库）。
 
-**仓库现状**：`E:\repos\Bluetooth-Input`，前端已迁到 `refactor/vue` 分支（Vue 3 + Vite），`main` 仍是旧的原生 JS 前端。`origin` 指向 GitHub。
+**仓库现状**：`E:\repos\Bluetooth-Input`，前端是 Vue 3 + Vite，已合并进 `main` 并推送到 `origin`（GitHub）。
 
 血缘：代码最初在 `E:\repos\ble` 里成形（那里还试过原生 Android App 路线，卡在「30 秒自动断开」），2026-11-07 合并进本仓库。`E:\repos\ble` 现在是冻结的旧副本，没有价值，可以随时丢弃；原生 App 源码未随本仓库保留（`.trash/` 中没有该目录）。
 
@@ -22,7 +22,7 @@
 
 **不能用 bleak。** bleak 只支持 Windows 做中心，本项目角色反过来，必须直接用 WinRT 的 `GattServiceProvider`。
 
-单一特征值双向通道，UUID 与帧格式见 [protocol.md](../protocol.md)。
+双特征值：上行 `7d9f0002`（手机写、电脑收），下行 `7d9f0003`（电脑通知、手机收），布局照搬 Nordic UART Service。UUID 与帧格式见 [protocol.md](../protocol.md)。
 
 ## 三、代码地图
 
@@ -113,6 +113,8 @@ OSError: [WinError -2147483634] 在意外的时间调用了方法
 
 修法：手机端改用 `writeValueWithResponse`，由 ATT 层保证先后顺序。旧代码用 `writeValueWithoutResponse` 抢速度，代价就是没有顺序语义。
 
+2026-11-07 之后上行特征值只声明 `WRITE`，无响应写在属性层就不存在，这条坑从协议上封死了。
+
 ### 5. 广播状态不能读一次了事
 
 `start_advertising()` 异步生效，紧接着读 `provider.advertisement_status` 拿到的是 `ABORTED`（3），日志里全是假警报。要监听 `add_advertisement_status_changed`，事件里是 `STARTED`（2）。
@@ -135,6 +137,14 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 第 8、9 条合起来造成过一次很迷惑的「9 秒断一次」：电脑端以为没人订阅 → 心跳被跳过 → 网页看门狗到点判死。看上去像协议 bug，实际是抢连接的连锁反应。
 
+### 10. 下行通知超过 512 字节会被 Android 栈静默丢弃
+
+Windows 报给 `GattSubscribedClient.max_notification_size` 的是 MTU-3，实测为 514 字节；但 Android 蓝牙栈在 `gatt_cl.cc:688 gatt_process_notification` 里会静默丢弃 `value.len > GATT_MAX_ATTR_LEN`（512）的通知，logcat 原话是 `value.len larger than GATT_MAX_ATTR_LEN, discard`。
+
+症状：长剪贴板消息的整分片全被丢掉，只有末尾那个小于 512 字节的短分片能到手机，长度前缀解码器永远拼不完整；后续心跳也被吞，9 秒看门狗判死重连。短消息（小于 512 字节）不受影响。
+
+修法：下行分片夹到 512，即 `min(GattSubscribedClient.max_notification_size, 512)`，代码在 `pc/protocol.py` 的 `downlink_chunk_size`。
+
 ## 六、环境事实
 
 | 项 | 值 |
@@ -151,7 +161,7 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 - 网页经 HTTPS 打开、扫描到电脑并连上
 - 长中文文本完整上屏，未复现 `UnicodeDecodeError`
-- 连接持续数分钟不中断，心跳按 3 秒稳定投递，通知按 514 字节分片送达
+- 连接持续数分钟不中断，心跳按 3 秒稳定投递，通知按 512 字节分片送达
 - 即时输入（逐字上屏、退格、回车）与剪贴板推送、拉取两个方向
 - 原「30 秒断开」未复现
 - `cd pc && uv run pytest` → 7 passed
@@ -179,7 +189,7 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 ```
 订阅变化：当前 1 个订阅客户端
-通知分片上限：514 字节
+通知分片上限：512 字节
 [网页] 已连接（第 1 段）
 ```
 

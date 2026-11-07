@@ -16,13 +16,12 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
     GattServiceProvider,
     GattServiceProviderAdvertisingParameters,
     GattSessionStatus,
-    GattWriteOption,
 )
 from winrt.windows.storage.streams import DataWriter
 
 from clipboard import get_clipboard_text, set_clipboard_text
 from frame_codec import Decoder, encode
-from protocol import CHAR_UUID, SERVICE_UUID
+from protocol import DOWNLINK_UUID, SERVICE_UUID, UPLINK_UUID, downlink_chunk_size
 
 logger = logging.getLogger("ble")
 
@@ -56,17 +55,22 @@ async def main() -> None:
     provider = (await GattServiceProvider.create_async(SERVICE_UUID)).service_provider
     logger.info("服务已创建 %s", SERVICE_UUID)
 
-    params = GattLocalCharacteristicParameters()
-    params.characteristic_properties = (
-        GattCharacteristicProperties.WRITE
-        | GattCharacteristicProperties.WRITE_WITHOUT_RESPONSE
-        | GattCharacteristicProperties.NOTIFY
-    )
-    params.write_protection_level = GattProtectionLevel.PLAIN
-    characteristic = (
-        await provider.service.create_characteristic_async(CHAR_UUID, params)
+    # 上行只声明 WRITE：无响应写没有顺序保证，会让长文本的分片颠倒。
+    # 不把 WRITE_WITHOUT_RESPONSE 写进属性，客户端想用也无从下手。
+    uplink_params = GattLocalCharacteristicParameters()
+    uplink_params.characteristic_properties = GattCharacteristicProperties.WRITE
+    uplink_params.write_protection_level = GattProtectionLevel.PLAIN
+    uplink = (
+        await provider.service.create_characteristic_async(UPLINK_UUID, uplink_params)
     ).characteristic
-    logger.info("特征值已创建 %s", CHAR_UUID)
+    logger.info("上行特征值已创建 %s（手机写入）", UPLINK_UUID)
+
+    downlink_params = GattLocalCharacteristicParameters()
+    downlink_params.characteristic_properties = GattCharacteristicProperties.NOTIFY
+    downlink = (
+        await provider.service.create_characteristic_async(DOWNLINK_UUID, downlink_params)
+    ).characteristic
+    logger.info("下行特征值已创建 %s（电脑通知）", DOWNLINK_UUID)
 
     loop = asyncio.get_running_loop()
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
@@ -83,18 +87,18 @@ async def main() -> None:
         try:
             request = args.get_request_async().get()
             data = bytes(request.value)
-            if request.option == GattWriteOption.WRITE_WITH_RESPONSE:
-                request.respond()
+            # 上行只声明了 WRITE，写请求必然是带响应的，直接应答即可。
+            request.respond()
         except Exception:
             logger.exception("处理写入请求失败")
             return
         loop.call_soon_threadsafe(incoming.put_nowait, data)
 
-    characteristic.add_write_requested(on_write_requested)
+    uplink.add_write_requested(on_write_requested)
 
     def on_max_notification_size_changed(client, _args) -> None:
         nonlocal notification_size
-        notification_size = client.max_notification_size
+        notification_size = downlink_chunk_size(client.max_notification_size)
         logger.info("通知分片上限：%d 字节", notification_size)
 
     watched: set[str] = set()
@@ -104,7 +108,7 @@ async def main() -> None:
         logger.info("链路状态：%s", state)
 
     def on_subscribed_changed(sender, args) -> None:
-        clients = list(characteristic.subscribed_clients)
+        clients = list(downlink.subscribed_clients)
         logger.info("订阅变化：当前 %d 个订阅客户端", len(clients))
         for client in clients:
             key = str(client.session.device_id)
@@ -115,17 +119,20 @@ async def main() -> None:
             client.session.add_session_status_changed(on_session_status_changed)
             on_max_notification_size_changed(client, None)
 
-    characteristic.add_subscribed_clients_changed(on_subscribed_changed)
+    downlink.add_subscribed_clients_changed(on_subscribed_changed)
 
     async def notify(message: dict) -> bool:
         """发出消息，返回是否至少有一个订阅客户端收到了。"""
         data = encode(json.dumps(message, ensure_ascii=False))
         delivered = False
         async with send_lock:
-            for i in range(0, len(data), notification_size):
+            # 取一份快照：发送途中订阅变化可能改写 notification_size，
+            # 步长与切片长度必须用同一个值，否则会漏字节。
+            size = notification_size
+            for i in range(0, len(data), size):
                 # 没人订阅时这里返回空列表，不会报错——所以必须逐条检查结果
-                results = await characteristic.notify_value_async(
-                    to_buffer(data[i:i + notification_size])
+                results = await downlink.notify_value_async(
+                    to_buffer(data[i:i + size])
                 )
                 for result in results:
                     if result.status != GattCommunicationStatus.SUCCESS:

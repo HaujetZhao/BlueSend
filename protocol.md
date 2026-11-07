@@ -12,10 +12,11 @@
 | 用途 | UUID |
 |---|---|
 | Service | `7d9f0001-3c4e-4b6a-9f2e-1a2b3c4d5e6f` |
-| Characteristic | `7d9f0002-3c4e-4b6a-9f2e-1a2b3c4d5e6f` |
-| CCCD（标准） | `00002902-0000-1000-8000-00805f9b34fb` |
+| 上行 Characteristic（手机写 → 电脑收） | `7d9f0002-3c4e-4b6a-9f2e-1a2b3c4d5e6f` |
+| 下行 Characteristic（电脑发 → 手机收） | `7d9f0003-3c4e-4b6a-9f2e-1a2b3c4d5e6f` |
+| CCCD（标准，只挂在下行） | `00002902-0000-1000-8000-00805f9b34fb` |
 
-特征值属性：`WRITE | WRITE_WITHOUT_RESPONSE | NOTIFY`，保护级别 `PLAIN`。
+上下行各有自己的特征值，属性即契约：上行只声明 `WRITE`，下行只声明 `NOTIFY`，保护级别都是 `PLAIN`。手机在向上行特征值写之前不需要订阅任何东西，订阅状态只影响下行。
 
 ## 帧格式
 
@@ -28,8 +29,8 @@
 
 ## 切片
 
-- **手机 → 电脑**：用 `writeValueWithResponse`。ATT 保证有响应写的先后顺序，这是长文本不乱序的关键；无响应写没有顺序保证，曾导致第 10、11 分片颠倒、UTF-8 解码报错。单包大小取 `maxWriteWithResponseSize`，拿不到就用 180 字节。
-- **电脑 → 手机**：按 `GattSubscribedClient.max_notification_size` 切片，这个值随协商 MTU 变化（Android Chrome 下通常是 512）。
+- **手机 → 电脑**：用 `writeValueWithResponse`。ATT 保证有响应写的先后顺序，这是长文本不乱序的关键；无响应写没有顺序保证，曾导致第 10、11 分片颠倒、UTF-8 解码报错。上行特征值只声明 `WRITE`，无响应写在属性层就没有，客户端想用也无从下手。单包大小取 `maxWriteWithResponseSize`，拿不到就用 180 字节。
+- **电脑 → 手机**：取 `min(GattSubscribedClient.max_notification_size, 512)` 切片。`max_notification_size` 是 MTU-3（实测 514），但 Android 的 GATT 栈会静默丢弃超过 512 字节的通知（`GATT_MAX_ATTR_LEN`），必须夹到 512。
 
 ## 消息
 

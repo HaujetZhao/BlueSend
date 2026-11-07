@@ -1,6 +1,7 @@
 import {
   SERVICE_UUID,
-  CHAR_UUID,
+  UPLINK_UUID,
+  DOWNLINK_UUID,
   HEARTBEAT_TIMEOUT_MS,
   FALLBACK_WRITE_CHUNK,
   RECONNECT_INTERVAL_MS,
@@ -13,7 +14,8 @@ export class BleClient {
   #onClipboard;
 
   #device = null;
-  #characteristic = null;
+  // 上下行两条特征值永远同时存在，用一次赋值一起拿进来，不作分别判空。
+  #link = null;
   #decoder = new FrameDecoder();
   #writeChain = Promise.resolve();
   #heartbeatTimer = null;
@@ -52,7 +54,7 @@ export class BleClient {
     } catch (err) {
       console.warn('选择设备失败', err);
       // 取消选择时旧链路还活着，恢复到已连接状态。
-      this.#onState(this.#characteristic ? 'connected' : 'disconnected');
+      this.#onState(this.#link ? 'connected' : 'disconnected');
     }
   }
 
@@ -72,12 +74,17 @@ export class BleClient {
       this.#onState('connecting');
       const server = await this.#device.gatt.connect();
       const service = await server.getPrimaryService(SERVICE_UUID);
-      const characteristic = await service.getCharacteristic(CHAR_UUID);
+      const uplink = await service.getCharacteristic(UPLINK_UUID);
+      const downlink = await service.getCharacteristic(DOWNLINK_UUID);
       if (generation !== this.#generation || this.#disposed) return;
-      this.#characteristic = characteristic;
-      await characteristic.startNotifications();
+      this.#link = { uplink, downlink };
+      // Chrome 把订阅状态缓存在特征值对象上：电脑端重启后，startNotifications
+      // 会以为自己还订阅着而直接返回，CCCD 一次都不写，Windows 端就永远收不到订阅。
+      // 先取消一次，再订阅，可以逼它把 CCCD 重新写一遍。未订阅时取消会抛错，属预期。
+      await downlink.stopNotifications().catch(() => {});
+      await downlink.startNotifications();
       if (generation !== this.#generation || this.#disposed) return;
-      characteristic.addEventListener('characteristicvaluechanged', this.#onNotify);
+      downlink.addEventListener('characteristicvaluechanged', this.#onNotify);
       this.#decoder.reset();
       this.#writeChain = Promise.resolve();
       this.#noteAlive();
@@ -89,19 +96,19 @@ export class BleClient {
     } catch (err) {
       if (generation !== this.#generation || this.#disposed) return;
       console.warn('连接失败', err);
-      this.#characteristic = null;
+      this.#link = null;
       this.#onState('disconnected');
       throw err;
     }
   }
 
   send(message) {
-    const characteristic = this.#characteristic;
-    if (!characteristic) return false;
+    const link = this.#link;
+    if (!link) return false;
     const generation = this.#generation;
     const frame = encodeFrame(message);
     this.#writeChain = this.#writeChain
-      .then(() => this.#writeFrame(characteristic, frame, generation))
+      .then(() => this.#writeFrame(link.uplink, frame, generation))
       .catch((err) => {
         console.error('发送失败', message.t, err);
         if (generation === this.#generation) {
@@ -125,7 +132,7 @@ export class BleClient {
     this.#heartbeatTimer = null;
     const device = this.#device;
     this.#device = null;
-    this.#characteristic = null;
+    this.#link = null;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
@@ -135,7 +142,7 @@ export class BleClient {
   #note(text) {
     console.info(text);
     this.#onEvent(text);
-    if (this.#characteristic) {
+    if (this.#link) {
       this.send({ t: 'log', v: text });
     } else {
       this.#pendingLogs.push(text);
@@ -148,13 +155,13 @@ export class BleClient {
     }
   }
 
-  async #writeFrame(characteristic, frame, generation) {
-    const size = characteristic.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
+  async #writeFrame(uplink, frame, generation) {
+    const size = uplink.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
     for (let i = 0; i < frame.length; i += size) {
       // 链路已经换了或断了，旧队列里的分片不再写。
       if (generation !== this.#generation) return;
-      // 有响应写由 ATT 保证先后顺序，这正是无响应写分片乱序的根源。
-      await characteristic.writeValueWithResponse(frame.subarray(i, i + size));
+      // 必须用带响应写：只有它由 ATT 保证先后顺序，无响应写会让分片乱序。
+      await uplink.writeValueWithResponse(frame.subarray(i, i + size));
     }
   }
 
@@ -192,7 +199,7 @@ export class BleClient {
   }
 
   #handleDrop = (reason) => {
-    if (this.#disposed || !this.#characteristic) return;
+    if (this.#disposed || !this.#link) return;
     this.#generation += 1;
     const lasted = this.#connectedAt
       ? ((Date.now() - this.#connectedAt) / 1000).toFixed(1)
@@ -200,7 +207,7 @@ export class BleClient {
     this.#connectedAt = 0;
     this.#dropCount += 1;
     clearTimeout(this.#heartbeatTimer);
-    this.#characteristic = null;
+    this.#link = null;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     this.#note(`第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`);
@@ -220,8 +227,8 @@ export class BleClient {
     if (!this.#device) return;
     try {
       await this.connect();
-      // 被代际作废的 attempt 也会 resolve，只有真正拿到 characteristic 才算连上。
-      if (this.#characteristic) {
+      // 被代际作废的 attempt 也会 resolve，只有真正拿到特征值才算连上。
+      if (this.#link) {
         this.#reconnectFailures = 0;
       } else {
         this.#scheduleReconnect();
@@ -243,7 +250,7 @@ export class BleClient {
 
   #onVisibilityChange = () => {
     // 页面回到前台时蓝牙可能已经被系统掐掉，主动检查一次。
-    if (document.visibilityState === 'visible' && this.#device && !this.#characteristic) {
+    if (document.visibilityState === 'visible' && this.#device && !this.#link) {
       this.connect().catch(() => {});
     }
   };
