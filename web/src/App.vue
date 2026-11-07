@@ -192,7 +192,9 @@ async function applyPulledClipboard(content) {
 
 // 一片一片刷会让事件行闪个不停，节流到 100 毫秒一次。
 const PROGRESS_INTERVAL_MS = 100;
+let benchDirection = '';
 let benchStarted = 0;
+let benchDoneAt = 0;
 let benchShownAt = 0;
 
 // 速率用「已传字节 ÷ 至今耗时」，是平均值，不逐片抖动。
@@ -204,16 +206,25 @@ function showBenchProgress(received, total) {
   lastEvent.value = `测速中… ${Math.round((received / total) * 100)}%（${rate.toFixed(1)} KB/s）`;
 }
 
-// 下行进度由手机自己从帧头算：电脑端在发大帧时插不进任何消息。
-function showReceiveProgress({ received, total }) {
+// 下行进度由手机自己从帧头算：电脑端的 notify 返回时只是把数据塞进了发送队列，
+// 发大帧时也插不进任何消息来报进度。progress 为 null 表示这一帧已经收完。
+function showReceiveProgress(progress) {
+  if (!benching.value || benchDirection !== 'down') return;
+  if (!progress) {
+    benchDoneAt = performance.now();
+    return;
+  }
   // 只有测速消息会这么大，心跳、剪贴板不管。
-  if (!benching.value || total < BENCH_BYTES) return;
-  showBenchProgress(received, total);
+  if (progress.total < BENCH_BYTES) return;
+  // 第一片到达才算开始，不含电脑端准备的那段时间。
+  if (!benchStarted) benchStarted = performance.now();
+  showBenchProgress(progress.received, progress.total);
 }
 
 async function benchUplink() {
   if (benching.value) return;
   benching.value = true;
+  benchDirection = 'up';
   benchStarted = performance.now();
   benchShownAt = 0;
   // 只改事件行，不发 log 消息：日志写在计时窗口之前会污染测量。
@@ -239,16 +250,18 @@ async function benchUplink() {
 function benchDownlink() {
   if (benching.value) return;
   benching.value = true;
-  benchStarted = performance.now();
+  benchDirection = 'down';
+  benchStarted = 0;
+  benchDoneAt = 0;
   benchShownAt = 0;
   lastEvent.value = '测速中…';
-  // 计时和结果都在电脑端，进度由收到的半帧算，这里只负责发起。
+  // 计时只能在手机端做，电脑端只管发数据。
   send({ t: 'benchdown' });
 }
 
-function showBenchResult({ bytes, ms, chunk }) {
+function showBenchResult({ bytes, chunk }) {
   benching.value = false;
-  note(describeBench('下行', { bytes, ms, chunk }));
+  note(describeBench('下行', { bytes, ms: benchDoneAt - benchStarted, chunk }));
 }
 
 // 同一个页面开多个标签页时，每个标签页都是一路独立的 Web Bluetooth 客户端，

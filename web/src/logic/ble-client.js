@@ -3,7 +3,7 @@ import {
   UPLINK_UUID,
   DOWNLINK_UUID,
   HEARTBEAT_TIMEOUT_MS,
-  FALLBACK_WRITE_CHUNK,
+  WRITE_CHUNK,
   RECONNECT_INTERVAL_MS,
   WRITE_ACK_TIMEOUT_MS,
 } from './protocol.js';
@@ -22,9 +22,9 @@ function writeWithTimeout(write) {
   return Promise.race([write, timeout]).finally(() => clearTimeout(timer));
 }
 
-// 上行单包大小：拿不到协商后的上限时退回 4.2 的默认 MTU。
+// 上行单包大小：浏览器给出协商上限就用它，没有就按实测的固定上限发。
 function chunkSizeOf(uplink) {
-  return uplink.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
+  return uplink.maxWriteWithResponseSize || WRITE_CHUNK;
 }
 
 // 重连可能无限进行（见坑 11），积压不设上限会一直吃内存；溢出时丢最旧的，
@@ -291,9 +291,8 @@ export class BleClient {
       this.#handleDrop('接收数据解析失败');
       return;
     }
-    // 帧被取走后缓冲里剩下的就是半帧，进度只看它。没有半帧时是 null。
-    const progress = this.#decoder.progress();
-    if (progress) this.#onReceiveProgress(progress);
+    // 帧被取走后缓冲里剩下的就是半帧，进度只看它。null 表示这一帧已经收完。
+    this.#onReceiveProgress(this.#decoder.progress());
   };
 
   #dispatch(message) {

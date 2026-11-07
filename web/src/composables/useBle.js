@@ -27,7 +27,7 @@ export function useBle({ onClipboard, onBench, onReceiveProgress }) {
     connected,
     connect: () => client.requestDevice(),
     send: (message) => client.send(message),
-    sendAsync: (message) => client.sendAsync(message),
+    sendAsync: (message, onProgress) => client.sendAsync(message, onProgress),
     uplinkChunkSize: () => client.uplinkChunkSize,
     note: (text) => client.note(text),
   };

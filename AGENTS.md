@@ -103,7 +103,7 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 完整定义以 [protocol.md](protocol.md) 为准，这里只记最容易踩的约束：
 
 - 帧格式：4 字节大端长度 + UTF-8 JSON；一条消息可以横跨多次写入或通知。
-- 手机 → 电脑：`writeValueWithResponse`，单包取 `maxWriteWithResponseSize`，拿不到用 180 字节。
+- 手机 → 电脑：`writeValueWithResponse`，单包 512 字节。Chrome 的 `BluetoothRemoteGATTCharacteristic` 上没有 `maxWriteWithResponseSize` 这个成员，而它硬拒超过 512 字节的写；512 与 180 的单包往返耗时一样（约 60 毫秒），所以必须用满 512。
 - 电脑 → 手机：分片取 `min(GattSubscribedClient.max_notification_size, 512)`。
 - 心跳：电脑每 3 秒发 `{"t":"hb"}`；网页 9 秒没收到任何字节就判定链路已死。
 - 一条消息的字节流必须原子发送，中途不能插入别的帧（插了会把载荷拆坏），所以大消息传输期间心跳发不出来。网页看门狗因此按「收到任意字节」计时，不等整条消息拼齐。
@@ -205,6 +205,16 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 `text` 消息默认用 `keyboard.write`（SendInput + `KEYEVENTF_UNICODE`）。焦点应用挂着中文输入法时，全角中文标点后的 `KEYUP` 会被输入法吞掉，Qt5 应用（微信、Telegram）按错乱的输入法状态提交，表现为标点后第一个字被替换成同一个标点。原生控件（记事本）、CMD、PowerShell、Windows Terminal 不受影响。
 
 修法：`pc/bluetooth_input/config.toml` 的 `wm_char_apps` 列出进程名（`Weixin.exe`、`Telegram.exe`），命中的改投 `WM_CHAR`（`pc/bluetooth_input/text_input.py`）。不能全局替换——Windows Terminal 收不到 `WM_CHAR`。完整复现与证据见 [docs/ime-typing-bug.md](docs/ime-typing-bug.md)。
+
+### 14. 上行比下行慢一个数量级：带响应写是停等协议
+
+真机测速（页面「测上行」「测下行」两颗按钮，各 256 KB）：下行约 3.3 秒（≈78 KB/s），上行约 33 秒（≈8 KB/s）。
+
+- **上行**用 `writeValueWithResponse`，每片必须等到 ATT 应答才能发下一片，等于链路里永远只有一个包在途。实测每片 512 字节耗时约 64 毫秒，正好是两个连接间隔（约 30 毫秒），所以吞吐 ≈ 512 B ÷ 64 ms。这是协议节奏，不是 bug。
+- **下行**用通知，没有应用层应答：Windows 把分片塞进控制器队列后连续发送，一个连接间隔能塞好几包，快了近十倍。
+- **顺序性两边都有**：带响应写由 ATT 保证；通知尽管没有应用层应答，但 BLE 链路层对每个链路层包按序可靠确认并重传，GATT Server 又按调用顺序入队（`send_lock` 保证一条消息整条入队后才发下一条）。坑 4 里的乱序只发生在**无响应写**，那是 ATT 命令写不保证顺序。
+- **下行的发送耗时要不到**：`notify_value_async` 返回时数据只是进了 Windows 的发送队列（256 KB 入队 0.4 秒，手机真收完 2.7 秒），所以在电脑端计时会得到一个假数，只能在手机端按收到的字节算。
+- 要提高上行吞吐只能改用无响应写、自己在应用层做序号和窗口，代价是协议复杂度和坑 4 的乱序风险。目前不做。
 
 ## 七、当前状态与已知限制
 

@@ -170,20 +170,23 @@ async def serve() -> None:
         return delivered and not failed
 
     async def bench_downlink() -> None:
-        """发一条 256 KB 的下行测速消息，再把发送耗时回报给手机。"""
+        """发一条 256 KB 的下行测速消息。
+
+        这里量不出空中耗时：notify_value_async 返回时只是把数据交给了 Windows
+        的发送队列（实测 256 KB 入队只用 0.4 秒，而手机真收完要 2.7 秒），
+        所以速率由手机按收到的字节自己算。
+        """
         started = time.perf_counter()
         if not await notify({"t": "benchdata", "v": BENCH_PAYLOAD}):
             logger.warning("下行测速未发出")
             return
-        elapsed = time.perf_counter() - started
         logger.info(
-            "下行测速：%d 字节 / %.1f 秒 = %.1f KB/s",
-            BENCH_BYTES, elapsed, BENCH_BYTES / elapsed / 1024,
+            "下行测速：%d 字节已入队，耗时 %.1f 秒（空中耗时以手机端为准）",
+            BENCH_BYTES, time.perf_counter() - started,
         )
         await notify({
             "t": "benchend",
             "bytes": BENCH_BYTES,
-            "ms": round(elapsed * 1000),
             "chunk": notification_size,
         })
 
