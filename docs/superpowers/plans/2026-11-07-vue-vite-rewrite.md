@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 后续变更：前端已收进 `web/`，`serve_web.py` 已移除，Pages 改由 GitHub Actions 构建。下文路径为当日原貌，当前结构以 `docs/HANDOFF.md` 为准。
+
 **Goal:** 把手机端页面从原生 JS 重写为 Vue 3 + Vite 工程，界面与行为保持不变，支持开发、单文件、PWA 三种运行形态。
 
 **Architecture:** BLE 传输逻辑放进不依赖 Vue 的 `src/logic/`：`frame-codec.js` 负责帧编解码，`ble-client.js` 负责连接、重连、心跳与写队列；`src/composables/useBle.js` 做响应式封装；`src/App.vue` 只负责界面与输入交互。两套 Vite 配置分别产出单文件与 PWA 产物。

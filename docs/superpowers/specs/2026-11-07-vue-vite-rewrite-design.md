@@ -3,6 +3,8 @@
 日期：2026-11-07
 分支：`refactor/vue`
 
+> 后续变更：前端已收进 `web/`，`serve_web.py` 已移除（本地一律用 `npm run dev`），Pages 改由 `.github/workflows/deploy.yml` 构建。本文保留当日设计原貌，当前结构以 `docs/HANDOFF.md` 为准。
+
 ## 一、背景与目标
 
 手机端页面目前是 `index.html` + `static/app.js`（约 370 行原生 JS）+ `static/style.css`，连接管理、帧编解码、看门狗、写队列、输入法与剪贴板逻辑混在一个全局脚本里；状态通过直接操作 DOM 同步，新增行为时容易互相牵连。
