@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useBle } from './composables/useBle.js';
 import { BENCH_BYTES } from './logic/protocol.js';
-import { BENCH_PAYLOAD, describeBench } from './logic/bench.js';
+import { BENCH_PAYLOAD, describeBench, sha256Hex } from './logic/bench.js';
 import { needRefresh, updateServiceWorker } from '@pwa-update';
 
 const instantMode = ref(true);
@@ -259,9 +259,17 @@ function benchDownlink() {
   send({ t: 'benchdown' });
 }
 
-function showBenchResult({ bytes, chunk }) {
+async function showBenchResult({ bytes, chunk, sha256, payload }) {
   benching.value = false;
-  note(describeBench('下行', { bytes, ms: benchDoneAt - benchStarted, chunk }));
+  const summary = describeBench('下行', { bytes, ms: benchDoneAt - benchStarted, chunk });
+  // 电脑端每次发随机载荷，哈希对不上就是分片被调换、重复或丢了字节。
+  // 这种情况帧仍是合法 JSON，长度也对，前面那些检查一律看不出来。
+  const actual = await sha256Hex(payload);
+  const check =
+    actual === sha256
+      ? `校验通过（${actual.slice(0, 8)}）`
+      : `校验失败：收到 ${actual.slice(0, 8)}，应为 ${sha256.slice(0, 8)}`;
+  note(`${summary} · ${check}`);
 }
 
 // 同一个页面开多个标签页时，每个标签页都是一路独立的 Web Bluetooth 客户端，

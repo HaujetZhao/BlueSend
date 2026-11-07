@@ -1,5 +1,7 @@
 """协议常量：与 web/src/logic/protocol.js 保持一致。"""
 
+import base64
+import secrets
 from uuid import UUID
 
 SERVICE_UUID = UUID("7d9f0001-3c4e-4b6a-9f2e-1a2b3c4d5e6f")
@@ -21,3 +23,13 @@ def downlink_chunk_size(reported: int) -> int:
 
 # 测速载荷大小：每次测速固定 256 KB。与 web/src/logic/protocol.js 保持一致。
 BENCH_BYTES = 256 * 1024
+
+
+def bench_payload() -> str:
+    """每次随机生成测速载荷。
+
+    不能用重复模式：换两片之后仍是合法 JSON、内容长度也一样，根本验不出来。
+    base64 是纯 ASCII，JSON 编码不产生转义，字符数即字节数；262144 能被 3 整除，
+    编码不带补位符，长度正好是 BENCH_BYTES。
+    """
+    return base64.b64encode(secrets.token_bytes(BENCH_BYTES // 4 * 3)).decode()

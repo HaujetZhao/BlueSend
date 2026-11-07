@@ -1,6 +1,7 @@
 """Windows 侧 BLE GATT Server：手机网页通过 Web Bluetooth 连上来，双向收发 JSON 消息。"""
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -22,10 +23,10 @@ from .clipboard import get_clipboard_text, set_clipboard_text
 from .config import load_wm_char_apps
 from .frame_codec import Decoder, FrameError, encode
 from .protocol import (
-    BENCH_BYTES,
     DOWNLINK_UUID,
     SERVICE_UUID,
     UPLINK_UUID,
+    bench_payload,
     downlink_chunk_size,
 )
 from .text_input import type_text
@@ -34,8 +35,6 @@ logger = logging.getLogger("ble")
 
 HEARTBEAT_SECONDS = 3
 FALLBACK_NOTIFICATION_SIZE = 20
-# 重复的可打印 ASCII：JSON 编码不产生转义，字符数与字节数一致，测量口径可预测。
-BENCH_PAYLOAD = "0123456789abcdef" * (BENCH_BYTES // 16)
 
 
 def to_buffer(data: bytes):
@@ -175,19 +174,25 @@ async def serve() -> None:
         这里量不出空中耗时：notify_value_async 返回时只是把数据交给了 Windows
         的发送队列（实测 256 KB 入队只用 0.4 秒，而手机真收完要 2.7 秒），
         所以速率由手机按收到的字节自己算。
+
+        载荷每次随机，并随 benchend 带上它的 SHA-256：手机用收到的内容重算、
+        比对，分片一旦被调换或重复就能发现——固定载荷换两片照样是合法 JSON。
         """
+        payload = bench_payload()
+        digest = hashlib.sha256(payload.encode()).hexdigest()
         started = time.perf_counter()
-        if not await notify({"t": "benchdata", "v": BENCH_PAYLOAD}):
+        if not await notify({"t": "benchdata", "v": payload}):
             logger.warning("下行测速未发出")
             return
         logger.info(
             "下行测速：%d 字节已入队，耗时 %.1f 秒（空中耗时以手机端为准）",
-            BENCH_BYTES, time.perf_counter() - started,
+            len(payload), time.perf_counter() - started,
         )
         await notify({
             "t": "benchend",
-            "bytes": BENCH_BYTES,
+            "bytes": len(payload),
             "chunk": notification_size,
+            "sha256": digest,
         })
 
     async def heartbeat_loop() -> None:

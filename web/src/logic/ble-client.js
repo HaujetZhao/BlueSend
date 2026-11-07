@@ -58,6 +58,8 @@ export class BleClient {
   #connecting = null;
   #generation = 0;
   #disposed = false;
+  // 刚收到的下行测速载荷，留着给随后的 benchend 做内容校验。
+  #benchPayload = '';
 
   constructor({ onState, onEvent, onClipboard, onBench, onReceiveProgress }) {
     this.#onState = onState;
@@ -300,8 +302,10 @@ export class BleClient {
     switch (message.t) {
       case 'hb':
       case 'pong':
+        break;
       case 'benchdata':
-        // 下行测速载荷本身没有用途，收到就丢，测速结果随后由 benchend 带来。
+        // 载荷没有业务含义，但要留着：benchend 到达时拿它重算哈希，验分片顺序。
+        this.#benchPayload = message.v;
         break;
       case 'clip':
         this.#onClipboard(message.v);
@@ -310,7 +314,12 @@ export class BleClient {
         this.#emit(message.v);
         break;
       case 'benchend':
-        this.#onBench(message);
+        this.#onBench({
+          bytes: message.bytes,
+          chunk: message.chunk,
+          sha256: message.sha256,
+          payload: this.#benchPayload,
+        });
         break;
       default:
         console.warn('未知消息', message);
