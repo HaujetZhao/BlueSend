@@ -22,7 +22,7 @@ from winrt.windows.storage.streams import DataWriter
 
 from .clipboard import get_clipboard_text, set_clipboard_text
 from .config import load_wm_char_apps
-from .frame_codec import Decoder, FrameError, encode
+from .frame_codec import Decoder, FrameError, UplinkAssembler, encode
 from .protocol import (
     DOWNLINK_UUID,
     SERVICE_UUID,
@@ -89,6 +89,11 @@ async def serve() -> None:
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
     send_lock = asyncio.Lock()
     notification_size = FALLBACK_NOTIFICATION_SIZE
+    # 上行分片先经重组（剥 4 字节序号、按序还原）再进解码队列：写回调跑在
+    # WinRT 线程池上，并发回调投递的字节顺序会颠倒。
+    assembler = UplinkAssembler(
+        lambda data: loop.call_soon_threadsafe(incoming.put_nowait, data)
+    )
 
     def on_write_requested(sender, args) -> None:
         """这条回调跑在 WinRT 自己的线程上。
@@ -106,7 +111,7 @@ async def serve() -> None:
             if request.option == GattWriteOption.WRITE_WITH_RESPONSE:
                 request.respond()
             request = None
-            loop.call_soon_threadsafe(incoming.put_nowait, data)
+            assembler.feed(data)
         except Exception:
             logger.exception("处理写入请求失败")
             # 取到请求却没应答，Windows 会一直等这次 ATT 事务，30 秒后整条链路断开。
@@ -134,6 +139,8 @@ async def serve() -> None:
         logger.info("订阅变化：当前 %d 个订阅客户端", len(clients))
         # 订阅变化只发生在连接边界。上行字节流是连接作用域的，旧连接写了一半
         # 的帧不能带进新连接，否则长度前缀会被读成任意值，解码器永久失步。
+        # 重组器同样按连接清零（自带锁，直接调即可）。
+        assembler.reset()
         loop.call_soon_threadsafe(decoder.reset)
         for client in clients:
             key = str(client.session.device_id)

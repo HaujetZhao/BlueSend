@@ -2,7 +2,13 @@ import struct
 
 import pytest
 
-from bluetooth_input.frame_codec import MAX_FRAME_BYTES, Decoder, FrameError, encode
+from bluetooth_input.frame_codec import (
+    MAX_FRAME_BYTES,
+    Decoder,
+    FrameError,
+    UplinkAssembler,
+    encode,
+)
 
 
 def test_encode_prefixes_length():
@@ -66,3 +72,50 @@ def test_reset_recovers_from_half_frame():
     assert d.feed(half) == []
     d.reset()
     assert d.feed(encode("新连接")) == ["新连接"]
+
+
+def _chunk(seq: int, body: bytes) -> bytes:
+    return seq.to_bytes(4, "big") + body
+
+
+def test_assembler_orders_swapped_chunks():
+    out = []
+    a = UplinkAssembler(out.append)
+    # 回调线程并发投递：1 先到、0 补洞，还原后顺序不能反。
+    a.feed(_chunk(1, b"world"))
+    a.feed(_chunk(0, b"hello"))
+    a.feed(_chunk(2, b"!"))
+    assert out == [b"hello", b"world", b"!"]
+
+
+def test_assembler_holds_gap_until_filled():
+    out = []
+    a = UplinkAssembler(out.append)
+    a.feed(_chunk(0, b"a"))
+    a.feed(_chunk(2, b"c"))
+    assert out == [b"a"]
+    a.feed(_chunk(1, b"b"))
+    assert out == [b"a", b"b", b"c"]
+
+
+def test_assembler_drops_duplicate():
+    out = []
+    a = UplinkAssembler(out.append)
+    a.feed(_chunk(0, b"a"))
+    a.feed(_chunk(0, b"a"))
+    assert out == [b"a"]
+
+
+def test_assembler_reset_discards_pending():
+    out = []
+    a = UplinkAssembler(out.append)
+    a.feed(_chunk(1, b"stale"))
+    a.reset()
+    a.feed(_chunk(0, b"fresh"))
+    assert out == [b"fresh"]
+
+
+def test_assembler_rejects_short_chunk():
+    a = UplinkAssembler(lambda _: None)
+    with pytest.raises(FrameError):
+        a.feed(b"\x01")

@@ -29,7 +29,7 @@
 
 ## 切片
 
-- **手机 → 电脑**：中间分片用 `writeValueWithoutResponse` 连续入队（不等应答，实测约 63 KB/s；带响应写是停等协议，只有约 8 KB/s），**最后一片用 `writeValueWithResponse`**——ATT 按序处理，它的应答到达时前面的分片必然已在空中排空，这一片同时是整条消息的送达确认、下一条消息的排队栅栏和测速的真实终点。单片消息自然落在最后一片分支，仍是带响应写。顺序不靠 ATT 保证（命令写无顺序承诺，见坑 4 的历史乱序），靠网页端逐片 `await` 的提交纪律：实测 517 片零乱序，测速哈希作持续金丝雀。单包 512 字节：Chrome 硬性拒绝超过 512 字节的写（ATT 属性值上限即 512），`maxWriteWithoutResponseSize` 要 Chrome 157 才有，当前走固定值。
+- **手机 → 电脑**：每片带 **4 字节大端序号前缀**（体 508＋头 4＝线包 512），电脑端写回调跑在线程池上、并发投递的字节顺序会颠倒（实测 517 片三轮坏一次：帧边界完好、内容等长错位），须按序号重排后再进解码器。中间分片用 `writeValueWithoutResponse` 连续入队（不等应答，实测约 63 KB/s；带响应写是停等协议，只有约 8 KB/s），**最后一片用 `writeValueWithResponse`**——ATT 按序处理，它的应答到达时前面的分片必然已在空中排空，这一片同时是整条消息的送达确认、下一条消息的排队栅栏和测速的真实终点。单片消息自然落在最后一片分支，仍是带响应写。单包 512 字节：Chrome 硬性拒绝超过 512 字节的写（ATT 属性值上限即 512），`maxWriteWithoutResponseSize` 要 Chrome 157 才有，当前走固定值。
 - **电脑 → 手机**：取 `min(GattSubscribedClient.max_notification_size, 512)` 切片。`max_notification_size` 是 MTU-3（实测 514），但 Android 的 GATT 栈会静默丢弃超过 512 字节的通知（`GATT_MAX_ATTR_LEN`），必须夹到 512。
 
 ## 消息

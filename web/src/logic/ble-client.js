@@ -61,6 +61,9 @@ export class BleClient {
   // 本轮重连是否已经提示过积压溢出，提示一次就够，免得刷掉真正的连接状态。
   #outboxOverflowNotified = false;
   #connecting = null;
+  // 上行分片序号：连接作用域的连续计数。不能每条消息从 0 数——电脑端重组器
+  // 跨消息只进不退，重新从 0 计数会被当成重复片全部丢弃。
+  #uplinkSeq = 0;
   #generation = 0;
   #disposed = false;
   // 刚收到的下行测速载荷，留着给随后的 benchend 做内容校验。
@@ -135,6 +138,7 @@ export class BleClient {
       downlink.addEventListener('characteristicvaluechanged', this.#onNotify);
       this.#decoder.reset();
       this.#writeChain = Promise.resolve();
+      this.#uplinkSeq = 0;
       this.#noteAlive();
       this.#stopReconnect();
       this.#connectedAt = Date.now();
@@ -238,6 +242,7 @@ export class BleClient {
     this.#outboxOverflowNotified = false;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
+    this.#uplinkSeq = 0;
     device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
     device?.gatt?.disconnect();
   }
@@ -263,23 +268,31 @@ export class BleClient {
   }
 
   async #writeFrame(uplink, frame, generation, onProgress) {
-    const size = chunkSizeOf(uplink);
+    // 每片 4 字节大端序号前缀：电脑端写回调跑在线程池上，并发投递的字节顺序
+    // 会颠倒（实测 517 片三轮坏一次），接收端按序号重排。体 508＋头 4＝线包 512。
+    const size = chunkSizeOf(uplink) - 4;
     const chunks = Math.ceil(frame.length / size);
+    // 序号取连接作用域的连续计数，跨消息不归零（见字段注释）。
+    const seqBase = this.#uplinkSeq;
+    this.#uplinkSeq += chunks;
     // 最后一片的应答要等前面所有分片在空中排空（实测约 8 毫秒一片），超时按
     // 片数放宽，余量 3 倍。固定 2 秒会把大消息的收尾误杀成断链。
     const timeoutMs = WRITE_ACK_TIMEOUT_MS + DRAIN_MS_PER_CHUNK * chunks;
-    for (let i = 0; i < frame.length; i += size) {
+    for (let i = 0, seq = seqBase; i < frame.length; i += size, seq += 1) {
       // 链路已经换了或断了，旧队列里的分片不再写。返回值告诉 sendAsync 这一帧作废。
       if (generation !== this.#generation) return false;
+      const body = frame.subarray(i, i + size);
       const last = i + size >= frame.length;
+      const chunk = new Uint8Array(4 + body.length);
+      new DataView(chunk.buffer).setUint32(0, seq, false);
+      chunk.set(body, 4);
       // 中间片用无响应写连续入队，不等应答（停等只有 8 KB/s，这样约 63 KB/s）；
       // 最后一片用带响应写——它的应答到达时前面的片必然已排空，一次拿到整条
-      // 消息的送达确认、下一条消息的排队栅栏和测速的真实终点。顺序不靠 ATT
-      // 保证，靠这里逐片 await 的提交纪律（实测 517 片零乱序，测速哈希作金丝雀）。
+      // 消息的送达确认、下一条消息的排队栅栏和测速的真实终点。
       await writeWithTimeout(
         last
-          ? uplink.writeValueWithResponse(frame.subarray(i))
-          : uplink.writeValueWithoutResponse(frame.subarray(i, i + size)),
+          ? uplink.writeValueWithResponse(chunk)
+          : uplink.writeValueWithoutResponse(chunk),
         timeoutMs,
       );
       onProgress?.(Math.min(i + size, frame.length), frame.length);
@@ -362,6 +375,7 @@ export class BleClient {
     this.#link = null;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
+    this.#uplinkSeq = 0;
     // 写失败或心跳超时不代表链路已经断了。主动断开，电脑端才能看到会话结束、
     // 清掉它那边的半帧缓冲；否则重连会继续用一条已经失步的流。
     if (this.#device?.gatt?.connected) this.#device.gatt.disconnect();
