@@ -40,6 +40,7 @@ E:\repos\Bluetooth-Input\
 │   └── composables\useBle.js   Vue 响应式封装
 ├── public\                     PWA 图标
 ├── certs\{cert,key}.pem        自签证书
+├── .github\workflows\deploy.yml  GitHub Actions：构建 PWA 并发布到 Pages
 ├── serve_web.py                托管 dist/ 的 HTTPS 静态服务
 ├── pc\                         电脑端
 └── .trash\                     废弃文件暂存区
@@ -64,7 +65,7 @@ uv run python server.py
 
 手机端三种访问方式：
 
-- **在线版**：`https://haujetzhao.github.io/Bluetooth-Input/`（需要先把当前前端部署上去）
+- **在线版**：`https://haujetzhao.github.io/Bluetooth-Input/`（由 `.github/workflows/deploy.yml` 在推送 `main` 后构建发布）
 - **本地开发**：电脑运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书
 - **单文件本地托管**：`npm run build` 后运行 `uv run --project pc python serve_web.py`，手机打开 `https://<电脑局域网IP>:8443`
 
@@ -163,7 +164,7 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 **接下来的优先级：**
 
-1. 先决定 GitHub Pages 发布方式：目前是 legacy 分支发布（`main:/`），直接合并推送会白屏；需要接 GitHub Actions 构建 `dist/`，或发布到 `gh-pages` 分支
+1. 上线顺序不能颠倒：先合并 `refactor/vue` 到 `main` 并推送（工作流文件随之上线），再把仓库 Settings → Pages 的 Source 从「Deploy from a branch（`main:/`）」改成「GitHub Actions」，最后手动触发一次 `Deploy to GitHub Pages`。顺序反了会白屏——根目录的 `index.html` 是 Vite 入口，不是可直接分发的页面
 2. 手机真机验收上面的 Vue 版本
 3. 长时间挂机（十几分钟以上、跨锁屏）看是否稳
 4. 之后才谈演进：GUI、历史记录、文件传输

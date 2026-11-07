@@ -78,10 +78,10 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 ├── public/                 PWA 图标
 ├── certs/                  自签证书
 ├── serve_web.py            本地 HTTPS 静态服务，托管 dist/
+├── .github/workflows/      GitHub Actions：构建 PWA 并发布到 Pages
 ├── protocol.md             协议：UUID、帧格式、消息类型
 ├── pc/                     电脑端
-├── docs/HANDOFF.md         开发交接文档
-└── bt_serial_receiver.py   早期 RFCOMM 串口方案，保留备用
+└── docs/HANDOFF.md         开发交接文档
 ```
 
 ## 开发
@@ -94,3 +94,9 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
 改协议时，`protocol.md`、`pc/server.py`、`src/logic/protocol.js`、`src/logic/frame-codec.js` 必须同步。
+
+## 发布
+
+在线版由 GitHub Actions 构建：推送到 `main`，或在 Actions 页面手动触发 `Deploy to GitHub Pages`。工作流依次跑 `npm ci`、`npm test`、`npm run build:pwa`，再把 `dist/` 发布出去。
+
+仓库 Settings → Pages 的 Source 必须选 **GitHub Actions**。若仍是旧的分支发布（`main:/`），根目录的 `index.html` 会被直接当静态页发出去，打开是白屏——那样必须切到 Actions 源。

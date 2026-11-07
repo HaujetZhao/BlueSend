@@ -18,7 +18,7 @@
 
 - 不加新功能，不改文案与布局。
 - 不改电脑端 `pc/`。
-- 本次不接 GitHub Pages 的 Action 工作流，只把构建脚本准备好。
+- 本次不接 GitHub Pages 的 Action 工作流，只把构建脚本准备好。（同日收尾后已补上 `.github/workflows/deploy.yml`，发布方式见 `readme.md` 的「发布」一节。）
 
 ## 二、构建与运行
 
