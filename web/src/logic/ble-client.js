@@ -49,6 +49,8 @@ export class BleClient {
   #reconnectFailures = 0;
   // 本轮连接是否已经对外宣布；没宣布就断的是后台重连过程中的失败。
   #announced = false;
+  // 电脑端看不到的断开原因（心跳超时、写入失败、解析失败）：断开时链路已经
+  // 没了，先攒着，重连宣布后补发。
   #pendingLogs = [];
   // 重连期间还没能交给写链的消息；本轮重新宣布连接后整批补发。
   #outbox = [];
@@ -75,8 +77,11 @@ export class BleClient {
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
   }
 
+  // 只刷手机端的事件行。业务日志不再镜像到电脑端——那边对同一件事已有自己的
+  // 记录（`收到剪贴板推送 46 字`），镜像过去只是重复。连接探针与断开诊断另有
+  // 通路，见 #doConnect 与 #handleDrop。
   note(text) {
-    this.#note(text);
+    this.#emit(text);
   }
 
   // 上行实际使用的单包大小，测速时随结果一起上报。
@@ -142,16 +147,16 @@ export class BleClient {
       this.#connectedAt = Date.now();
       // 「已连接」这条日志兼作探针：电脑端重启后 Chrome 还在用旧 GATT 句柄，
       // 这次写必然失败。写成功才对外宣布连上，写失败就静默丢弃、继续后台重连。
-      // 探针文字给日志看（第 N 段是连接次数），状态栏只给人看。
-      const logText = `已连接（第 ${this.#dropCount + 1} 段）`;
+      // 探针与状态栏用同一句话，电脑端日志和手机事件行能直接对照。
+      const text = `已连接（第 ${this.#dropCount + 1} 次）`;
       try {
-        await this.#queue(this.#link, { t: 'log', v: logText }, generation);
+        await this.#queue(this.#link, { t: 'log', v: text }, generation);
       } catch {
         return;
       }
       if (generation !== this.#generation || this.#disposed) return;
       this.#announced = true;
-      this.#emit(`已连接（第 ${this.#dropCount + 1} 次）`);
+      this.#emit(text);
       this.#flushPendingLogs();
       this.#flushOutbox();
       this.#onState('connected');
@@ -250,15 +255,6 @@ export class BleClient {
   #emit(text) {
     console.info(text);
     this.#onEvent(text);
-  }
-
-  #note(text) {
-    this.#emit(text);
-    if (this.#link) {
-      this.send({ t: 'log', v: text });
-    } else {
-      this.#pendingLogs.push(text);
-    }
   }
 
   #flushPendingLogs() {
@@ -384,15 +380,15 @@ export class BleClient {
     // 写失败或心跳超时不代表链路已经断了。主动断开，电脑端才能看到会话结束、
     // 清掉它那边的半帧缓冲；否则重连会继续用一条已经失步的流。
     if (this.#device?.gatt?.connected) this.#device.gatt.disconnect();
-    const logText = `第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`;
+    const logText = `第 ${this.#dropCount} 次断开：${reason}，上次连接存活 ${lasted} 秒`;
+    console.info(logText);
     // 还没对外宣布连上就断了，说明是后台重连过程中的失败，不刷前台。
     if (this.#announced) {
       this.#announced = false;
-      // 状态栏只给结论，断开原因与存活时长写进电脑端日志。
       this.#emit('连接已断开，正在自动重连…');
-      this.#pendingLogs.push(logText);
-    } else {
-      console.info(logText);
+      // 物理断开电脑端自己就能看到（订阅清零 + 链路状态：已断开），不必再发；
+      // 另外三种原因只有手机知道，攒到重连后补发。
+      if (reason !== '物理断开') this.#pendingLogs.push(logText);
     }
     this.#onState('disconnected');
     this.#scheduleReconnect();
