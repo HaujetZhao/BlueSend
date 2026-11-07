@@ -5,7 +5,7 @@
 - 电脑：GATT Server（外设），持续广播自定义 Service
 - 手机：GATT Client（中心），用网页（Web Bluetooth）连接
 
-网页需要安全上下文：`serve_web.py` 起一个 HTTPS 静态服务，手机信任一次自签证书即可打开页面，不需要装 App。
+网页需要安全上下文：在线版直接跑在 GitHub Pages 的 HTTPS 下；本地则用 Vite dev server（`web/` 目录下的 `npm run dev`），手机信任一次自签证书即可打开页面，不需要装 App。
 
 ## UUID
 

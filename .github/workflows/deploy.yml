@@ -25,13 +25,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+        working-directory: web
       # 帧编解码单测，坏代码不进 Pages
       - run: npm test
+        working-directory: web
       - run: npm run build:pwa
+        working-directory: web
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: ./dist
+          path: ./web/dist
 
   deploy:
     needs: build

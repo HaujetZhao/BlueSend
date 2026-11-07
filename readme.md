@@ -20,6 +20,7 @@
 ### 1. 安装依赖
 
 ```powershell
+cd web
 npm install
 ```
 
@@ -38,19 +39,9 @@ uv run python server.py
 
 **在线版**：手机浏览器打开 **https://haujetzhao.github.io/Bluetooth-Input/** ，点「扫描连接」选中你的电脑即可。
 
-**本地开发**：电脑运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书。
+**本地开发**：在 `web` 目录运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书。dev server 走的是 `web/certs/` 下的自签证书。
 
-**单文件本地托管**：
-
-以下命令在仓库根目录执行：
-
-```powershell
-npm run build
-uv run --project pc python serve_web.py
-# 手机访问 https://<电脑局域网 IP>:8443
-```
-
-换网络导致局域网 IP 变化、证书不匹配时，重签一次：
+换网络导致局域网 IP 变化、证书不匹配时，在 `web` 目录重签一次：
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes \
@@ -69,34 +60,34 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 ## 目录结构
 
 ```text
-├── index.html              Vite 入口
-├── src/                    Vue 源码
-│   ├── App.vue             页面与输入交互
-│   ├── styles.css          样式
-│   ├── logic/              帧编解码、协议常量、BLE 客户端
-│   └── composables/        useBle 响应式封装
-├── public/                 PWA 图标
-├── certs/                  自签证书
-├── serve_web.py            本地 HTTPS 静态服务，托管 dist/
+├── web/                    手机端网页（Vue 3 + Vite）
+│   ├── index.html          Vite 入口
+│   ├── src/                App.vue、styles.css、logic/、composables/
+│   ├── public/             PWA 图标
+│   ├── certs/              自签证书，dev server 用
+│   └── vite.config*.js     开发 / 单文件 / PWA 三套构建
+├── pc/                     电脑端，WinRT GATT Server
 ├── .github/workflows/      GitHub Actions：构建 PWA 并发布到 Pages
 ├── protocol.md             协议：UUID、帧格式、消息类型
-├── pc/                     电脑端
-└── docs/HANDOFF.md         开发交接文档
+├── docs/HANDOFF.md         开发交接文档
+└── readme.md
 ```
 
 ## 开发
 
+前端命令都在 `web/` 目录下执行：
+
 ```powershell
 npm run dev        # HTTPS 开发服务器，手机可访问
 npm test           # 帧编解码单测
-npm run build      # 单文件产物 dist/index.html（`public/` 下的 PWA 图标也会一并复制到 dist/）
+npm run build      # 单文件产物 dist/index.html，交给任意 HTTPS 托管
 npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
-改协议时，`protocol.md`、`pc/server.py`、`src/logic/protocol.js`、`src/logic/frame-codec.js` 必须同步。
+改协议时，`protocol.md`、`pc/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
 ## 发布
 
-在线版由 GitHub Actions 构建：推送到 `main`，或在 Actions 页面手动触发 `Deploy to GitHub Pages`。工作流依次跑 `npm ci`、`npm test`、`npm run build:pwa`，再把 `dist/` 发布出去。
+在线版由 GitHub Actions 构建：推送到 `main`，或在 Actions 页面手动触发 `Deploy to GitHub Pages`。工作流在 `web/` 目录下依次跑 `npm ci`、`npm test`、`npm run build:pwa`，再把 `web/dist/` 发布出去。
 
-仓库 Settings → Pages 的 Source 必须选 **GitHub Actions**。若仍是旧的分支发布（`main:/`），根目录的 `index.html` 会被直接当静态页发出去，打开是白屏——那样必须切到 Actions 源。
+仓库 Settings → Pages 的 Source 必须选 **GitHub Actions**。

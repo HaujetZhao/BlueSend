@@ -18,7 +18,7 @@
 |---|---|---|
 | GATT Server（外设，广播） | Windows 电脑 | Python 3.14 + `winrt-Windows.Devices.Bluetooth.GenericAttributeProfile` |
 | GATT Client（中心，主动连接） | 手机 | 网页 + Web Bluetooth（Android Chrome） |
-| 网页承载 | GitHub Pages（`haujetzhao.github.io/Bluetooth-Input/`），或本地 `serve_web.py` | 静态 HTTPS 页面（Web Bluetooth 要求安全上下文） |
+| 网页承载 | GitHub Pages（`haujetzhao.github.io/Bluetooth-Input/`），或本地 Vite dev server | 静态 HTTPS 页面（Web Bluetooth 要求安全上下文） |
 
 **不能用 bleak。** bleak 只支持 Windows 做中心，本项目角色反过来，必须直接用 WinRT 的 `GattServiceProvider`。
 
@@ -30,18 +30,18 @@
 E:\repos\Bluetooth-Input\
 ├── readme.md                   对外说明
 ├── protocol.md                 协议的唯一事实来源
-├── index.html                  Vite 入口
-├── src\
-│   ├── App.vue                 手机端页面与输入交互
-│   ├── styles.css
-│   ├── logic\protocol.js       UUID 与链路参数
-│   ├── logic\frame-codec.js    帧编解码
-│   ├── logic\ble-client.js     连接、重连、心跳、写队列
-│   └── composables\useBle.js   Vue 响应式封装
-├── public\                     PWA 图标
-├── certs\{cert,key}.pem        自签证书
 ├── .github\workflows\deploy.yml  GitHub Actions：构建 PWA 并发布到 Pages
-├── serve_web.py                托管 dist/ 的 HTTPS 静态服务
+├── web\                        手机端网页
+│   ├── index.html              Vite 入口
+│   ├── src\App.vue             手机端页面与输入交互
+│   ├── src\styles.css
+│   ├── src\logic\protocol.js   UUID 与链路参数
+│   ├── src\logic\frame-codec.js 帧编解码
+│   ├── src\logic\ble-client.js 连接、重连、心跳、写队列
+│   ├── src\composables\useBle.js Vue 响应式封装
+│   ├── public\                 PWA 图标
+│   ├── certs\{cert,key}.pem    自签证书，dev server 用
+│   └── vite.config{,.pwa}.js   三套构建配置
 ├── pc\                         电脑端
 └── .trash\                     废弃文件暂存区
 ```
@@ -63,15 +63,14 @@ uv run python server.py
 
 看到 `广播状态：Started`（数值 2）就是在等手机连接。日志同时写 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。
 
-手机端三种访问方式：
+手机端两种访问方式：
 
 - **在线版**：`https://haujetzhao.github.io/Bluetooth-Input/`（由 `.github/workflows/deploy.yml` 在推送 `main` 后构建发布）
-- **本地开发**：电脑运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书
-- **单文件本地托管**：`npm run build` 后运行 `uv run --project pc python serve_web.py`，手机打开 `https://<电脑局域网IP>:8443`
+- **本地开发**：在 `web\` 下运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书
 
 连上后点「扫描连接」→ 选中电脑。页面状态栏下面那行小字会写「已连接（第 N 段）」，断开时写原因和上一段存活时长。
 
-前端命令：
+前端命令，都在 `web\` 目录下执行：
 
 ```powershell
 npm install
@@ -164,7 +163,7 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 **接下来的优先级：**
 
-1. 上线顺序不能颠倒：先合并 `refactor/vue` 到 `main` 并推送（工作流文件随之上线），再把仓库 Settings → Pages 的 Source 从「Deploy from a branch（`main:/`）」改成「GitHub Actions」，最后手动触发一次 `Deploy to GitHub Pages`。顺序反了会白屏——根目录的 `index.html` 是 Vite 入口，不是可直接分发的页面
+1. 分支已合并进 `main` 并推送，Pages 改由 `.github/workflows/deploy.yml` 构建发布
 2. 手机真机验收上面的 Vue 版本
 3. 长时间挂机（十几分钟以上、跨锁屏）看是否稳
 4. 之后才谈演进：GUI、历史记录、文件传输
@@ -202,5 +201,5 @@ curl -s http://127.0.0.1:9222/json      # 列出标签页，拿 webSocketDebugge
 - 提交信息不加 `Co-Authored-By`
 - 不直接删文件，要删就移到项目内 `.trash/`
 - 界面观感由用户本人判断（过渡顺不顺、布局观感），我只负责客观断言：日志、编译、DOM/样式读数
-- 改协议时 `protocol.md`、`pc/server.py`、`src/logic/protocol.js`、`src/logic/frame-codec.js` 必须同步
+- 改协议时 `protocol.md`、`pc/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步
 - 独立的搜索、多文件改动、机械核对优先派 subagent，主会话做编排与审阅
