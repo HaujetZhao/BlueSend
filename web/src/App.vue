@@ -352,7 +352,7 @@ onUnmounted(() => tabChannel.close());
     <div v-if="!instantMode" class="button-group">
       <button class="btn-clear" @click="clearInput">清空</button>
       <button class="btn-send" :disabled="!connected" @click="sendText">
-        发送 (Ctrl+Enter)
+        发送
       </button>
     </div>
 
