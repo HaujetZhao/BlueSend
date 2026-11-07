@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useBle } from './composables/useBle.js';
 import { BENCH_BYTES } from './logic/protocol.js';
-import { BENCH_PAYLOAD, describeBench, sha256Hex } from './logic/bench.js';
+import { describeBench, randomBenchPayload, sha256Hex } from './logic/bench.js';
 import { needRefresh, updateServiceWorker } from '@pwa-update';
 
 const instantMode = ref(true);
@@ -21,7 +21,6 @@ const {
   connect: connectBle,
   send,
   sendAsync,
-  sendRaw,
   uplinkChunkSize,
   note,
 } = useBle({
@@ -226,14 +225,20 @@ async function benchUplink() {
   if (benching.value) return;
   benching.value = true;
   benchDirection = 'up';
-  benchStarted = performance.now();
   benchShownAt = 0;
+  // 载荷与哈希在计时窗口外生成。消息自带 sha256，电脑端重算比对——无响应写
+  // 的分片若被调换，帧仍合法、长度也对，只有内容哈希能发现。
+  const payload = randomBenchPayload();
+  const sha256 = await sha256Hex(payload);
+  benchStarted = performance.now();
   // 只改事件行，不发 log 消息：日志写在计时窗口之前会污染测量。
   lastEvent.value = '测速中…';
   try {
     // 单包大小先取：写完再看，链路可能已经断了。
     const chunk = uplinkChunkSize();
-    await sendAsync({ t: 'benchup', v: BENCH_PAYLOAD }, showBenchProgress);
+    // 计时终点是最后一片的 ATT 应答——它到达时前面的分片已在空中排空，
+    // 所以这个耗时就是真实空口时间，不是本地入队时间。
+    await sendAsync({ t: 'benchup', v: payload, sha256 }, showBenchProgress);
     note(
       describeBench('上行', {
         bytes: BENCH_BYTES,
@@ -258,24 +263,6 @@ function benchDownlink() {
   lastEvent.value = '测速中…';
   // 计时只能在手机端做，电脑端只管发数据。
   send({ t: 'benchdown' });
-}
-
-// 临时探针：不重排、不重传、不等应答，只量 Windows 收不收得到和裸吞吐。
-// 真实耗时以电脑端日志里 seq 首末时间戳为准——这里量到的是入队速度。
-async function benchRaw() {
-  if (benching.value) return;
-  benching.value = true;
-  lastEvent.value = '裸发中…';
-  const started = performance.now();
-  try {
-    const chunks = await sendRaw(BENCH_PAYLOAD, 508);
-    const seconds = (performance.now() - started) / 1000;
-    note(`裸发 ${chunks} 片入队完毕，耗时 ${seconds.toFixed(1)} 秒（真实速率看电脑端日志）`);
-  } catch (err) {
-    note('裸发失败：' + err.message);
-  } finally {
-    benching.value = false;
-  }
 }
 
 async function showBenchResult({ bytes, chunk, sha256, payload }) {
@@ -378,13 +365,6 @@ onUnmounted(() => tabChannel.close());
         @click="benchDownlink"
       >
         测下行
-      </button>
-      <button
-        class="btn btn-bench"
-        :disabled="!connected || benching"
-        @click="benchRaw"
-      >
-        上行裸发
       </button>
     </div>
   </div>

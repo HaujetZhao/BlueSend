@@ -9,22 +9,27 @@ import {
 } from './protocol.js';
 import { encodeFrame, FrameDecoder } from './frame-codec.js';
 
-// 带响应写的 Promise 只有在收到 ATT 响应时才 settle。链路半断时它可能一直
-// 挂着，所以在这里加一道上限；超时后调用方会主动断开链路。
-function writeWithTimeout(write) {
+// 写入的 Promise 可能一直挂着（带响应写等不到应答、无响应写在缓冲满时排队），
+// 所以加一道上限；超时后调用方会主动断开链路。超时值可按消息大小放宽。
+function writeWithTimeout(write, timeoutMs = WRITE_ACK_TIMEOUT_MS) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`等待 ATT 响应超过 ${WRITE_ACK_TIMEOUT_MS} 毫秒`)),
-      WRITE_ACK_TIMEOUT_MS,
+      () => reject(new Error(`等待写入完成超过 ${timeoutMs} 毫秒`)),
+      timeoutMs,
     );
   });
   return Promise.race([write, timeout]).finally(() => clearTimeout(timer));
 }
 
-// 上行单包大小：浏览器给出协商上限就用它，没有就按实测的固定上限发。
+// 空中排空实测约 8 毫秒一片（512 B ≈ 63 KB/s）。最后一片的应答要等前面的
+// 片在空中排空，超时按片数放宽，余量 3 倍。
+const DRAIN_MS_PER_CHUNK = 25;
+
+// 上行单包大小。无响应写的协商上限 maxWriteWithoutResponseSize 要 Chrome 157
+// 才有，当前版本原型上没有，永远走实测的 512（见 protocol.js 的注释）。
 function chunkSizeOf(uplink) {
-  return uplink.maxWriteWithResponseSize || WRITE_CHUNK;
+  return uplink.maxWriteWithoutResponseSize || WRITE_CHUNK;
 }
 
 // 重连可能无限进行（见坑 11），积压不设上限会一直吃内存；溢出时丢最旧的，
@@ -185,25 +190,6 @@ export class BleClient {
     });
   }
 
-  // 临时探针：整段载荷按 size 切片、每片前置 4 字节大端序号，用无响应写连续裸发。
-  // 不重排、不重传、不等应答，只用来量「Windows 收不收得到、能跑多快、乱序多深」。
-  async sendRaw(text, size) {
-    const uplink = this.#link.uplink;
-    if (!uplink.writeValueWithoutResponse) {
-      throw new Error('这个浏览器没有 writeValueWithoutResponse');
-    }
-    const bytes = new TextEncoder().encode(text);
-    let seq = 0;
-    for (let i = 0; i < bytes.length; i += size, seq += 1) {
-      const body = bytes.subarray(i, i + size);
-      const chunk = new Uint8Array(4 + body.length);
-      new DataView(chunk.buffer).setUint32(0, seq, false);
-      chunk.set(body, 4);
-      await uplink.writeValueWithoutResponse(chunk);
-    }
-    return seq;
-  }
-
   // 本轮重连已经宣布，按顺序把积压交给写链。若写链随后失败，代际作废会让
   // 剩余消息自然不再写出，按坑 12 的语义丢弃，不做应用层重试。
   #flushOutbox() {
@@ -278,12 +264,23 @@ export class BleClient {
 
   async #writeFrame(uplink, frame, generation, onProgress) {
     const size = chunkSizeOf(uplink);
+    const chunks = Math.ceil(frame.length / size);
+    // 最后一片的应答要等前面所有分片在空中排空（实测约 8 毫秒一片），超时按
+    // 片数放宽，余量 3 倍。固定 2 秒会把大消息的收尾误杀成断链。
+    const timeoutMs = WRITE_ACK_TIMEOUT_MS + DRAIN_MS_PER_CHUNK * chunks;
     for (let i = 0; i < frame.length; i += size) {
       // 链路已经换了或断了，旧队列里的分片不再写。返回值告诉 sendAsync 这一帧作废。
       if (generation !== this.#generation) return false;
-      // 必须用带响应写：只有它由 ATT 保证先后顺序，无响应写会让分片乱序。
+      const last = i + size >= frame.length;
+      // 中间片用无响应写连续入队，不等应答（停等只有 8 KB/s，这样约 63 KB/s）；
+      // 最后一片用带响应写——它的应答到达时前面的片必然已排空，一次拿到整条
+      // 消息的送达确认、下一条消息的排队栅栏和测速的真实终点。顺序不靠 ATT
+      // 保证，靠这里逐片 await 的提交纪律（实测 517 片零乱序，测速哈希作金丝雀）。
       await writeWithTimeout(
-        uplink.writeValueWithResponse(frame.subarray(i, i + size)),
+        last
+          ? uplink.writeValueWithResponse(frame.subarray(i))
+          : uplink.writeValueWithoutResponse(frame.subarray(i, i + size)),
+        timeoutMs,
       );
       onProgress?.(Math.min(i + size, frame.length), frame.length);
     }

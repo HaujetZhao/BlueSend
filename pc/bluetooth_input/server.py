@@ -55,8 +55,10 @@ async def serve() -> None:
     provider = service_result.service_provider
     logger.info("服务已创建 %s", SERVICE_UUID)
 
-    # 临时探针：确认 Windows 的 GATT Server 认不认 WRITE_WITHOUT_RESPONSE。
-    # 探针结束按结论二选一：留下它并接上滑动窗口，或者删回只声明 WRITE。
+    # 上行声明 WRITE | WRITE_WITHOUT_RESPONSE：手机端中间分片用无响应写连续入队
+    # （停等只有约 8 KB/s，无响应约 63 KB/s），最后一片用带响应写拿送达确认。
+    # 顺序不靠 ATT 保证，靠网页端逐片 await 的提交纪律（实测 517 片零乱序，
+    # 测速哈希作金丝雀，见坑 14）。
     uplink_params = GattLocalCharacteristicParameters()
     uplink_params.characteristic_properties = (
         GattCharacteristicProperties.WRITE
@@ -99,17 +101,10 @@ async def serve() -> None:
         try:
             request = args.get_request_async().get()
             data = bytes(request.value)
-            # 临时探针：无响应写没有 ATT 应答可发，只把序号记进日志，
-            # 事后统计「收不收得到、跑到多快、乱序多深」。探针结束就删。
-            if request.option == GattWriteOption.WRITE_WITHOUT_RESPONSE:
-                request = None
-                logger.info(
-                    "无响应写 seq=%d len=%d",
-                    int.from_bytes(data[:4], "big"),
-                    len(data),
-                )
-                return
-            request.respond()
+            # 无响应写没有 ATT 事务，respond 会抛错，跳过；带响应写必须在这条
+            # 线程上同步应答，否则 30 秒后整条链路断开（见坑 2）。
+            if request.option == GattWriteOption.WRITE_WITH_RESPONSE:
+                request.respond()
             request = None
             loop.call_soon_threadsafe(incoming.put_nowait, data)
         except Exception:
@@ -245,8 +240,18 @@ async def serve() -> None:
                 logger.info("拉取系统剪贴板 %d 字", len(text))
                 await notify({"t": "clip", "v": text})
         elif kind == "benchup":
-            # 测速载荷没有业务含义，只记一行大小，避免把 256 KB 打进日志。
-            logger.info("上行测速：收到 %d 字节", len(message.get("v", "")))
+            # 消息自带 sha256，重算比对：无响应写的分片若被调换，帧仍合法、
+            # 长度也对，只有内容哈希能发现。失败用 notice 顶到手机事件行。
+            payload = message.get("v", "")
+            actual = hashlib.sha256(payload.encode()).hexdigest()
+            if actual == message.get("sha256"):
+                logger.info("上行测速：收到 %d 字节，校验通过", len(payload))
+            else:
+                logger.warning(
+                    "上行测速：校验失败，收到 %s 应为 %s",
+                    actual[:8], str(message.get("sha256"))[:8],
+                )
+                await notify({"t": "notice", "v": "上行测速校验失败：分片内容与发出不一致"})
         elif kind == "benchdown":
             await bench_downlink()
         elif kind == "ping":

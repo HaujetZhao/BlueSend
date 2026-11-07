@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeBench, sha256Hex } from './bench.js';
+import { BENCH_BYTES } from './protocol.js';
+import { describeBench, randomBenchPayload, sha256Hex } from './bench.js';
+
+test('随机载荷是定长纯 ASCII', () => {
+  // 字符数必须等于字节数，否则「256 KB」的口径两端对不上。
+  const payload = randomBenchPayload();
+  assert.equal(payload.length, BENCH_BYTES);
+  assert.match(payload, /^[\x21-\x7e]+$/);
+});
+
+test('随机载荷每次不同', () => {
+  // 固定载荷换两片也验不出来，每次必须不同。
+  assert.notEqual(randomBenchPayload(), randomBenchPayload());
+});
 
 test('sha256 与标准向量一致', async () => {
   assert.equal(
