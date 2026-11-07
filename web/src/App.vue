@@ -9,7 +9,6 @@ const instantMode = ref(true);
 const text = ref('');
 const inputEl = ref(null);
 let composing = false;
-const hasEverConnected = ref(false);
 const hasTriedConnect = ref(false);
 // 测速期间两颗按钮都锁住：一次只跑一个方向。
 const benching = ref(false);
@@ -32,9 +31,6 @@ const {
 const statusLabel = computed(
   () => ({ disconnected: '未连接', connecting: '连接中', connected: '已连接' })[status.value],
 );
-const connectLabel = computed(() =>
-  connected.value || hasEverConnected.value ? '重新连接' : '扫描连接',
-);
 const placeholder = computed(() => {
   if (status.value === 'connecting') return '正在重新连接，请稍候…';
   if (status.value === 'connected') {
@@ -53,7 +49,6 @@ watch(status, (state) => {
     benching.value = false;
     return;
   }
-  hasEverConnected.value = true;
   focusInput();
 });
 
@@ -68,6 +63,20 @@ function connect() {
 
 function focusInput() {
   inputEl.value?.focus();
+}
+
+// 点按钮会把焦点从输入框抢走（手机键盘跟着收起）。按下之前先记住焦点在不在
+// 输入框里，操作开始后还回去——原本没在打字就维持原样。
+let inputHadFocus = false;
+
+function rememberInputFocus() {
+  inputHadFocus = document.activeElement === inputEl.value;
+}
+
+function restoreInputFocus() {
+  if (!inputHadFocus) return;
+  inputHadFocus = false;
+  focusInput();
 }
 
 function toggleInstant() {
@@ -156,14 +165,12 @@ function onKeydown(event) {
 }
 
 function pullClipboard() {
-  if (!send({ t: 'pull' })) alert('蓝牙未连接！');
+  restoreInputFocus();
+  send({ t: 'pull' });
 }
 
 async function pushClipboard() {
-  if (!connected.value) {
-    alert('蓝牙未连接！');
-    return;
-  }
+  restoreInputFocus();
   let content;
   try {
     content = await navigator.clipboard.readText();
@@ -175,18 +182,25 @@ async function pushClipboard() {
     alert('手机剪贴板为空！');
     return;
   }
-  send({ t: 'clip', v: content });
+  try {
+    // 等到最后一片的 ATT 应答再宣布成功：send() 只代表进了队列。
+    await sendAsync({ t: 'clip', v: content });
+    note(`成功推送剪贴板（${content.length} 字符）`);
+  } catch (err) {
+    note('推送剪贴板失败：' + err.message);
+  }
 }
 
 async function applyPulledClipboard(content) {
-  text.value = content;
-  focusInput();
-  // 浏览器权限限制下写入可能失败；内容已经显示在输入框里，不影响使用。
+  // 成功的标志是写进手机剪贴板，不再把内容塞进输入框。
   try {
     await navigator.clipboard.writeText(content);
-    console.info('已写入手机剪贴板');
+    note(`成功拉取剪贴板（${content.length} 字符）`);
   } catch (err) {
     console.warn('写入手机剪贴板失败', err);
+    // 浏览器拒绝写入时保底：放进输入框，内容不至于丢。
+    text.value = content;
+    note('手机剪贴板写入失败，内容已放进输入框');
   }
 }
 
@@ -304,16 +318,15 @@ onUnmounted(() => tabChannel.close());
 <template>
   <div class="card">
     <div class="top-bar">
-      <div class="left-controls">
-        <span class="status-badge" :class="status">{{ statusLabel }}</span>
-        <button
-          class="btn-connect"
-          :disabled="status === 'connecting'"
-          @click="connect"
-        >
-          {{ connectLabel }}
-        </button>
-      </div>
+      <button
+        class="status-badge"
+        :class="status"
+        :disabled="status === 'connecting'"
+        :aria-label="status === 'connected' ? '重新连接' : '连接蓝牙'"
+        @click="connect"
+      >
+        {{ statusLabel }}
+      </button>
 
       <div class="switch-container">
         <span>即时发送</span>
@@ -324,21 +337,10 @@ onUnmounted(() => tabChannel.close());
       </div>
     </div>
 
-    <div class="event-log">
-      {{ lastEvent }}
-      <button
-        v-if="needRefresh"
-        class="update-hint"
-        @click="updateServiceWorker(true)"
-      >
-        有新版本，点击刷新
-      </button>
-    </div>
-
     <textarea
       ref="inputEl"
       :value="text"
-      :style="{ height: instantMode ? '80px' : '120px' }"
+      :style="{ height: instantMode ? '96px' : '120px' }"
       :placeholder="placeholder"
       @compositionstart="onCompositionStart"
       @compositionend="onCompositionEnd"
@@ -348,31 +350,45 @@ onUnmounted(() => tabChannel.close());
     ></textarea>
 
     <div v-if="!instantMode" class="button-group">
-      <button class="btn btn-send" :disabled="!connected" @click="sendText">
+      <button class="btn-clear" @click="clearInput">清空</button>
+      <button class="btn-send" :disabled="!connected" @click="sendText">
         发送 (Ctrl+Enter)
       </button>
-      <button class="btn btn-clear" @click="clearInput">清空</button>
     </div>
 
     <div class="clipboard-group">
-      <button class="btn btn-pull" @click="pullClipboard">拉取剪贴板</button>
-      <button class="btn btn-push" @click="pushClipboard">推送剪贴板</button>
+      <button class="btn-pull" :disabled="!connected" @pointerdown="rememberInputFocus" @click="pullClipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 4v14" /><path d="M6 13l6 6 6-6" />
+        </svg>
+        拉取剪贴板
+      </button>
+      <button class="btn-push" :disabled="!connected" @pointerdown="rememberInputFocus" @click="pushClipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20V6" /><path d="M6 11l6-6 6 6" />
+        </svg>
+        推送剪贴板
+      </button>
     </div>
 
     <div class="bench-group">
-      <button
-        class="btn btn-bench"
-        :disabled="!connected || benching"
-        @click="benchUplink"
-      >
-        测上行
+      <button class="btn-bench" :disabled="!connected || benching" @click="benchUplink">
+        上行测速
       </button>
+      <span class="bench-sep"></span>
+      <button class="btn-bench" :disabled="!connected || benching" @click="benchDownlink">
+        下行测速
+      </button>
+    </div>
+
+    <div class="event-log">
+      {{ lastEvent }}
       <button
-        class="btn btn-bench"
-        :disabled="!connected || benching"
-        @click="benchDownlink"
+        v-if="needRefresh"
+        class="update-hint"
+        @click="updateServiceWorker(true)"
       >
-        测下行
+        有新版本，点击刷新
       </button>
     </div>
   </div>

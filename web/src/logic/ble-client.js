@@ -142,15 +142,16 @@ export class BleClient {
       this.#connectedAt = Date.now();
       // 「已连接」这条日志兼作探针：电脑端重启后 Chrome 还在用旧 GATT 句柄，
       // 这次写必然失败。写成功才对外宣布连上，写失败就静默丢弃、继续后台重连。
-      const text = `已连接（第 ${this.#dropCount + 1} 段）`;
+      // 探针文字给日志看（第 N 段是连接次数），状态栏只给人看。
+      const logText = `已连接（第 ${this.#dropCount + 1} 段）`;
       try {
-        await this.#queue(this.#link, { t: 'log', v: text }, generation);
+        await this.#queue(this.#link, { t: 'log', v: logText }, generation);
       } catch {
         return;
       }
       if (generation !== this.#generation || this.#disposed) return;
       this.#announced = true;
-      this.#emit(text);
+      this.#emit(`已连接（第 ${this.#dropCount + 1} 次）`);
       this.#flushPendingLogs();
       this.#flushOutbox();
       this.#onState('connected');
@@ -383,13 +384,15 @@ export class BleClient {
     // 写失败或心跳超时不代表链路已经断了。主动断开，电脑端才能看到会话结束、
     // 清掉它那边的半帧缓冲；否则重连会继续用一条已经失步的流。
     if (this.#device?.gatt?.connected) this.#device.gatt.disconnect();
-    const text = `第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`;
+    const logText = `第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`;
     // 还没对外宣布连上就断了，说明是后台重连过程中的失败，不刷前台。
     if (this.#announced) {
       this.#announced = false;
-      this.#note(text);
+      // 状态栏只给结论，断开原因与存活时长写进电脑端日志。
+      this.#emit('连接已断开，正在自动重连…');
+      this.#pendingLogs.push(logText);
     } else {
-      console.info(text);
+      console.info(logText);
     }
     this.#onState('disconnected');
     this.#scheduleReconnect();

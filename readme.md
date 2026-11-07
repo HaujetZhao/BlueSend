@@ -37,7 +37,7 @@ uv run python main.py
 
 ### 3. 手机端连接
 
-**在线版**：手机浏览器打开 **https://haujetzhao.github.io/Bluetooth-Input/** ，点「扫描连接」选中你的电脑即可。
+**在线版**：手机浏览器打开 **https://haujetzhao.github.io/Bluetooth-Input/** ，点左上角的连接状态药丸选中你的电脑即可。
 
 **本地开发**：在 `web` 目录运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书。dev server 走的是 `web/certs/` 下的自签证书。
 
