@@ -185,6 +185,25 @@ export class BleClient {
     });
   }
 
+  // 临时探针：整段载荷按 size 切片、每片前置 4 字节大端序号，用无响应写连续裸发。
+  // 不重排、不重传、不等应答，只用来量「Windows 收不收得到、能跑多快、乱序多深」。
+  async sendRaw(text, size) {
+    const uplink = this.#link.uplink;
+    if (!uplink.writeValueWithoutResponse) {
+      throw new Error('这个浏览器没有 writeValueWithoutResponse');
+    }
+    const bytes = new TextEncoder().encode(text);
+    let seq = 0;
+    for (let i = 0; i < bytes.length; i += size, seq += 1) {
+      const body = bytes.subarray(i, i + size);
+      const chunk = new Uint8Array(4 + body.length);
+      new DataView(chunk.buffer).setUint32(0, seq, false);
+      chunk.set(body, 4);
+      await uplink.writeValueWithoutResponse(chunk);
+    }
+    return seq;
+  }
+
   // 本轮重连已经宣布，按顺序把积压交给写链。若写链随后失败，代际作废会让
   // 剩余消息自然不再写出，按坑 12 的语义丢弃，不做应用层重试。
   #flushOutbox() {

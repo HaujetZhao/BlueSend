@@ -21,6 +21,7 @@ const {
   connect: connectBle,
   send,
   sendAsync,
+  sendRaw,
   uplinkChunkSize,
   note,
 } = useBle({
@@ -259,6 +260,24 @@ function benchDownlink() {
   send({ t: 'benchdown' });
 }
 
+// 临时探针：不重排、不重传、不等应答，只量 Windows 收不收得到和裸吞吐。
+// 真实耗时以电脑端日志里 seq 首末时间戳为准——这里量到的是入队速度。
+async function benchRaw() {
+  if (benching.value) return;
+  benching.value = true;
+  lastEvent.value = '裸发中…';
+  const started = performance.now();
+  try {
+    const chunks = await sendRaw(BENCH_PAYLOAD, 508);
+    const seconds = (performance.now() - started) / 1000;
+    note(`裸发 ${chunks} 片入队完毕，耗时 ${seconds.toFixed(1)} 秒（真实速率看电脑端日志）`);
+  } catch (err) {
+    note('裸发失败：' + err.message);
+  } finally {
+    benching.value = false;
+  }
+}
+
 async function showBenchResult({ bytes, chunk, sha256, payload }) {
   benching.value = false;
   const summary = describeBench('下行', { bytes, ms: benchDoneAt - benchStarted, chunk });
@@ -359,6 +378,13 @@ onUnmounted(() => tabChannel.close());
         @click="benchDownlink"
       >
         测下行
+      </button>
+      <button
+        class="btn btn-bench"
+        :disabled="!connected || benching"
+        @click="benchRaw"
+      >
+        上行裸发
       </button>
     </div>
   </div>

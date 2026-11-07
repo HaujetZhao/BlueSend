@@ -16,6 +16,7 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
     GattServiceProvider,
     GattServiceProviderAdvertisingParameters,
     GattSessionStatus,
+    GattWriteOption,
 )
 from winrt.windows.storage.streams import DataWriter
 
@@ -54,10 +55,13 @@ async def serve() -> None:
     provider = service_result.service_provider
     logger.info("服务已创建 %s", SERVICE_UUID)
 
-    # 上行只声明 WRITE：无响应写没有顺序保证，会让长文本的分片颠倒。
-    # 不把 WRITE_WITHOUT_RESPONSE 写进属性，客户端想用也无从下手。
+    # 临时探针：确认 Windows 的 GATT Server 认不认 WRITE_WITHOUT_RESPONSE。
+    # 探针结束按结论二选一：留下它并接上滑动窗口，或者删回只声明 WRITE。
     uplink_params = GattLocalCharacteristicParameters()
-    uplink_params.characteristic_properties = GattCharacteristicProperties.WRITE
+    uplink_params.characteristic_properties = (
+        GattCharacteristicProperties.WRITE
+        | GattCharacteristicProperties.WRITE_WITHOUT_RESPONSE
+    )
     uplink_params.write_protection_level = GattProtectionLevel.PLAIN
     uplink_result = await provider.service.create_characteristic_async(
         UPLINK_UUID, uplink_params
@@ -95,7 +99,16 @@ async def serve() -> None:
         try:
             request = args.get_request_async().get()
             data = bytes(request.value)
-            # 上行只声明了 WRITE，写请求必然是带响应的，直接应答即可。
+            # 临时探针：无响应写没有 ATT 应答可发，只把序号记进日志，
+            # 事后统计「收不收得到、跑到多快、乱序多深」。探针结束就删。
+            if request.option == GattWriteOption.WRITE_WITHOUT_RESPONSE:
+                request = None
+                logger.info(
+                    "无响应写 seq=%d len=%d",
+                    int.from_bytes(data[:4], "big"),
+                    len(data),
+                )
+                return
             request.respond()
             request = None
             loop.call_soon_threadsafe(incoming.put_nowait, data)
