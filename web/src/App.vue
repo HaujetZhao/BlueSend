@@ -16,10 +16,12 @@ const benching = ref(false);
 // 通的。探测是 HTTPS 页面发往局域网 HTTP 的请求：Chrome 用「本地网络」权限放行，
 // 请求需要声明 targetAddressSpace，授权后即豁免混合内容拦截。
 const uploadLinks = ref([]);
-const uploadUrl = ref(null);
 const uploadPerm = ref('unsupported');
 const uploadBusy = ref(false);
 const uploadBlocked = ref(false);
+// 探测结果只对当次 net 有效。用代际号判新旧，不能比数组引用：ref 会把数组
+// 包成 reactive 代理，uploadLinks.value 永远不等于传进来的原始数组。
+let uploadGeneration = 0;
 
 const {
   status,
@@ -35,24 +37,24 @@ const {
   onBench: showBenchResult,
   onReceiveProgress: showReceiveProgress,
   onNet: (hosts) => {
+    uploadGeneration += 1;
     uploadLinks.value = hosts;
-    uploadUrl.value = null;
     uploadBusy.value = false;
     uploadBlocked.value = false;
-    if (hosts.length) prepareUpload(hosts);
+    if (hosts.length) prepareUpload(hosts, uploadGeneration);
   },
 });
 
 const statusLabel = computed(
   () => ({ disconnected: '未连接', connecting: '连接中', connected: '已连接' })[status.value],
 );
-// 已授权时探测完全自动，探不到可达入口就禁用按钮；没授权时按钮必须可点，
-// 那次点击才是触发权限提示的用户手势。
+// 已授权时探测完全自动，探不到可达入口就把按钮置灰；但置灰只是提示，不阻止
+// 点击——网络可能在两次探测之间恢复，真正可不可达由点击那一刻的探测决定。
+// 没授权时无法探测，按钮同样保持可点，那次点击是触发授权提示的用户手势。
 const canUpload = computed(
   () => connected.value
     && uploadLinks.value.length > 0
-    && !uploadBusy.value
-    && !uploadBlocked.value,
+    && !uploadBusy.value,
 );
 const placeholder = computed(() => {
   if (status.value === 'connecting') return '正在重新连接，请稍候…';
@@ -193,9 +195,26 @@ function pullClipboard() {
 }
 
 const LOCAL_NETWORK_PERMISSION = 'local-network';
-const PROBE_TIMEOUT_MS = 2500;
-// 首次探测会弹「本地网络」授权框，用户可能要看几秒，别被普通超时打断。
+// 局域网内的 HTTP 响应是毫秒级的（实测几十毫秒），0.5 秒足够；探测是并发跑的，
+// 等待上限就是这个值，不可达的候选不该让用户干等。
+const PROBE_TIMEOUT_MS = 500;
+// 公网页面上首次探测会弹「本地网络」授权框，用户可能要看几秒，别被普通超时打断。
 const PROBE_PROMPT_TIMEOUT_MS = 20000;
+// 页面本身就在局域网地址上时（本地 dev server），请求属于同地址空间，不需要
+// 本地网络权限，浏览器也不会弹授权框——只有公网页面（在线版）才可能要。
+const pageIsLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(
+  location.hostname,
+);
+
+// 这次探测可能弹出授权框：公网页面且权限还是 prompt。denied 不会再弹。
+function mayPrompt() {
+  return !pageIsLocal && uploadPerm.value === 'prompt';
+}
+
+// 公网页面上还没拿到本地网络权限：探测失败也可能是权限没放行。
+function permissionMayBlock() {
+  return !pageIsLocal && (uploadPerm.value === 'prompt' || uploadPerm.value === 'denied');
+}
 
 async function permissionState() {
   try {
@@ -209,54 +228,64 @@ async function permissionState() {
   }
 }
 
-// 收到 net 后：只有已经授权时才自动探测，并据此决定按钮可不可用。
-// 权限还是 prompt 时不能静默探测（浏览器会拒绝），留给用户点击去触发。
-async function prepareUpload(hosts) {
+// 收到 net 后自动探测一次，据此决定按钮要不要提示性置灰。探测结果只是提示：
+// 网络和权限都可能随时变化，点击时一律重新探测。
+// 权限状态不能当探测的前置条件：local-network 管的是「公网页面访问局域网」，
+// 页面本身就在局域网地址上时同地址空间不需要授权（实测权限是 prompt 也能通）。
+// 只有公网页面 + 浏览器不认识这个权限时才跳过，那种情况下探测必然被混合内容拦死。
+async function prepareUpload(hosts, generation) {
   uploadPerm.value = await permissionState();
-  if (uploadLinks.value !== hosts || uploadPerm.value !== 'granted') return;
+  if (generation !== uploadGeneration) return;
+  if (uploadPerm.value === 'unsupported' && !pageIsLocal) return;
   uploadBusy.value = true;
   const url = await firstReachable(hosts, PROBE_TIMEOUT_MS);
-  if (uploadLinks.value !== hosts) return;
+  if (generation !== uploadGeneration) return;
   uploadBusy.value = false;
-  uploadUrl.value = url;
   uploadBlocked.value = !url;
+  // 按钮自己变灰，得让用户知道为什么。
+  if (uploadBlocked.value) noteUnreachable();
 }
 
-// 打开电脑托管的上传页。探测是异步的，先同步开一个空标签页占位，否则
-// window.open 会被浏览器当弹窗拦截。传完的结果不会回到这里。
+// 探测失败在 fetch 里一律是 TypeError，分不清是网络不通还是浏览器没给本地
+// 网络权限，所以权限可能挡路时把两种可能都说出来。
+function noteUnreachable() {
+  note(
+    permissionMayBlock()
+      ? '没有入口能连通：请确认手机与电脑在同一局域网，并允许浏览器访问本地网络'
+      : '没有入口能连通，请确认手机与电脑在同一局域网',
+  );
+}
+
+// 打开电脑托管的上传页。探测完成前不打开任何页面：不可达时不该甩给用户一个
+// 空白页。探测是并发的，正常网络下 0.5 秒内就有结果，仍在 Chrome 留给
+// window.open 的用户激活窗口（5 秒）内；真被拦截就退化为顶层导航。
 async function openUpload() {
   const hosts = uploadLinks.value;
   if (!hosts.length) return;
-  const popup = window.open('about:blank', '_blank');
-  if (!popup) {
-    note('浏览器拦截了新标签页，请允许弹窗后重试');
-    return;
-  }
   note('正在探测入口…');
-  let url = uploadUrl.value;
-  if (!url) {
-    if (uploadPerm.value === 'unsupported') {
-      // 无法探测的浏览器只能用默认路由那个地址，失败就失败。
-      url = hosts[0];
-    } else {
-      const timeout = uploadPerm.value === 'granted'
-        ? PROBE_TIMEOUT_MS
-        : PROBE_PROMPT_TIMEOUT_MS;
-      url = await firstReachable(hosts, timeout);
-    }
+  // 每次点击都重新探测：网络可能在两次 net 之间断掉，之前探测的结果不可信。
+  let url;
+  if (uploadPerm.value === 'unsupported' && !pageIsLocal) {
+    // 公网页面上没法豁免混合内容，只能用默认路由那个地址，失败就失败。
+    url = hosts[0];
+  } else {
+    const timeout = mayPrompt() ? PROBE_PROMPT_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+    url = await firstReachable(hosts, timeout);
   }
   if (!url) {
-    popup.close();
-    note(
-      uploadPerm.value === 'denied'
-        ? '文件上传需要本地网络权限，请在浏览器网站设置里允许后重试'
-        : '没有入口能连通，请确认手机与电脑在同一局域网',
-    );
+    // 这次点击可能刚刚拿到授权，重新读一次权限，只为了让提示说得准确。
+    uploadPerm.value = await permissionState();
+    uploadBlocked.value = true;
+    noteUnreachable();
     return;
   }
-  uploadUrl.value = url;
   uploadBlocked.value = false;
-  popup.location.href = url;
+  const popup = window.open(url, '_blank');
+  if (!popup) {
+    // 授权提示耗时超过激活窗口时 window.open 会被拦；顶层导航总能打开。
+    location.href = url;
+    return;
+  }
   note('已打开上传页');
 }
 
@@ -282,11 +311,18 @@ async function reachable(pageUrl, timeoutMs) {
   }
 }
 
+// 并发探测全部候选，第一个通的胜出。串行最坏要 N × 超时，点击时容易耗光
+// 浏览器留给 window.open 的用户激活窗口。
 async function firstReachable(hosts, timeoutMs) {
-  for (const url of hosts) {
-    if (await reachable(url, timeoutMs)) return url;
-  }
-  return null;
+  return new Promise((resolve) => {
+    let pending = hosts.length;
+    for (const url of hosts) {
+      reachable(url, timeoutMs).then((ok) => {
+        if (ok) resolve(url);
+        else if (--pending === 0) resolve(null);
+      });
+    }
+  });
 }
 
 async function pushClipboard() {
@@ -500,7 +536,12 @@ onUnmounted(() => tabChannel.close());
         下行测速
       </button>
       <span class="bench-sep"></span>
-      <button class="btn-bench" :disabled="!canUpload" @click="openUpload">
+      <button
+        class="btn-bench"
+        :class="{ 'is-blocked': uploadBlocked }"
+        :disabled="!canUpload"
+        @click="openUpload"
+      >
         发送文件
       </button>
     </div>

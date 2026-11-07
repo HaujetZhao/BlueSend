@@ -370,6 +370,11 @@ textarea:focus {
   cursor: default;
 }
 
+/* 上次探测没通，只是提示性置灰；点击仍会重新探测，通了就把样式恢复。 */
+.btn-bench.is-blocked {
+  opacity: 0.4;
+}
+
 .bench-sep {
   width: 1px;
   height: 11px;

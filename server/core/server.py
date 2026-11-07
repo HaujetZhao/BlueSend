@@ -37,7 +37,16 @@ from .upload_server import start_upload_server
 
 logger = logging.getLogger("ble")
 
+
+def format_upload_hosts(hosts: list[str]) -> str:
+    """一行一个入口，多个网卡地址不至于挤成一坨。"""
+    return "\n".join(hosts) if hosts else "没有可用的局域网地址"
+
+
 HEARTBEAT_SECONDS = 3
+# 上传入口不是常驻不变的：电脑可能中途接入新的局域网（比如手机开了热点），
+# 地址会变，而 BLE 链路不受影响、不会再触发订阅事件。轮询发现变化后重发。
+NET_POLL_SECONDS = 3
 FALLBACK_NOTIFICATION_SIZE = 20
 
 
@@ -92,7 +101,7 @@ async def serve() -> bool:
     # 文件上传走局域网 HTTP：蓝牙只负责把入口 URL 送到手机。入口地址随 net
     # 消息在每次订阅变化时下发（连接作用域，同 mtu）。
     uploads = start_upload_server(load_upload_folder())
-    logger.info("文件上传入口：%s", "、".join(uploads.urls()) or "没有可用的局域网地址")
+    logger.info("文件上传入口：\n%s", format_upload_hosts(uploads.urls()))
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -167,6 +176,23 @@ async def serve() -> bool:
             lambda: asyncio.create_task(notify({"t": "mtu", "up": size}))
         )
 
+    # 上传入口是连接作用域的，但也不是常驻不变的：电脑中途接入新的局域网时
+    # 地址会变。订阅时的首次下发与网络变化后的重发共用这一个出口，比较列表
+    # 即可去重，重复的 net 只会让手机白探测一遍。
+    # 日志只在地址真的变了时写：每次重连都重新下发是协议需要，但不值得刷屏——
+    # 启动时已经打印过一次入口。
+    last_net_hosts: list[str] = uploads.urls()
+
+    async def send_net(force: bool = False) -> None:
+        nonlocal last_net_hosts
+        hosts = uploads.urls()
+        if hosts != last_net_hosts:
+            last_net_hosts = hosts
+            logger.info("上传入口变化：\n%s", format_upload_hosts(hosts))
+        elif not force:
+            return
+        await notify({"t": "net", "hosts": hosts})
+
     watched: set[str] = set()
 
     def on_session_status_changed(session, _args) -> None:
@@ -200,12 +226,10 @@ async def serve() -> bool:
             # 就整条连接按 20 字节切。
             on_max_notification_size_changed(client, None)
         if clients:
-            # 上传入口同样是连接作用域的。地址在重新连接时现算一次，电脑换了
-            # 网络也能拿到新地址。
+            # 上传入口是连接作用域的，每条连接都现算一次；之后的变化由
+            # net_watch_loop 负责重发。
             loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(
-                    notify({"t": "net", "hosts": uploads.urls()})
-                )
+                lambda: asyncio.create_task(send_net(force=True))
             )
 
     downlink.add_subscribed_clients_changed(on_subscribed_changed)
@@ -279,6 +303,19 @@ async def serve() -> bool:
             if delivered != alive:
                 alive = delivered
                 logger.info("心跳投递：%s", "正常" if delivered else "没有订阅客户端")
+
+    async def net_watch_loop() -> None:
+        """局域网地址一变就重发上传入口。
+
+        BLE 链路跨网络变化不受影响，订阅事件不会再来；不主动发现的话，手机端
+        会一直用连接建立那一刻的候选地址。
+        """
+        while True:
+            await asyncio.sleep(NET_POLL_SECONDS)
+            try:
+                await send_net()
+            except Exception:
+                logger.exception("重发上传入口失败")
 
     async def handle(message: dict) -> None:
         kind = message.get("t")
@@ -356,6 +393,7 @@ async def serve() -> bool:
     provider.start_advertising(advertising)
 
     heartbeat = asyncio.create_task(heartbeat_loop())
+    net_watch = asyncio.create_task(net_watch_loop())
     tray.start()
     try:
         # 读循环永远不会自己结束，用退出事件与它竞速：谁先完成就收谁。
@@ -369,6 +407,7 @@ async def serve() -> bool:
     finally:
         tray.stop()
         heartbeat.cancel()
+        net_watch.cancel()
         provider.stop_advertising()
         uploads.stop()
         logger.info("停止广播")
