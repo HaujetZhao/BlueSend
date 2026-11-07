@@ -12,6 +12,7 @@ from core.paths import APP_DIR, FROZEN
 from core.server import serve
 from core.single_instance import acquire as acquire_instance_lock
 from core.single_instance import release as release_instance_lock
+from core.tray import enable_dpi_awareness
 
 logger = logging.getLogger("ble")
 
@@ -42,6 +43,8 @@ def launch_command() -> list[str]:
 
 
 def main() -> None:
+    # 必须早于任何窗口创建，否则托盘右键菜单在高分屏上会被系统拉伸。
+    enable_dpi_awareness()
     setup_logging(APP_DIR / "logs")
     # 多实例会各自注册同一个 Service UUID、互相挤掉广播，症状极难认（坑 8），
     # 所以抢不到锁就先退出，别去碰 BLE。

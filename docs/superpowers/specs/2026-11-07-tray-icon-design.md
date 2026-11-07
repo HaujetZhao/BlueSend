@@ -44,6 +44,12 @@
 - 重启：`serve()` 返回 `True`。`main.py` **先** `single_instance.release()` 关闭互斥体句柄，**再** `Popen` 新进程。顺序不能反：互斥体是存在性锁，旧进程没放锁时新进程会直接退出。
 - 重启命令行：打包后 `[sys.executable, *sys.argv[1:]]`（`argv[0]` 就是 exe，不能重复传）；源码运行 `[sys.executable, *sys.argv]`。
 
+## 高 DPI
+
+进程默认是 DPI unaware，高分屏上右键菜单会被 Windows 当成位图整体拉伸，字发糊。`main()` 第一行调用 `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`，必须早于任何窗口创建。pystray 每次右键都重新创建弹出菜单，声明感知后菜单按当前显示器 DPI 绘制，跨屏拖动也由系统重算。
+
+实测：打包进程的 `GetProcessDpiAwareness` 返回 2（PROCESS_PER_MONITOR_DPI_AWARE）。
+
 ## Windows Terminal 的代价
 
 隐藏操作作用于控制台的顶层窗口（`GetConsoleWindow` 后取 `GetAncestor(GA_ROOT)`）。在 Windows Terminal 里运行时，被隐藏的是整个终端窗口（所有标签页），不只是本程序；双击 exe 时是普通 conhost，只影响本窗口。这与参考实现 CapsWriter-Offline 的行为一致。

@@ -44,6 +44,17 @@ _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 
 
+def enable_dpi_awareness() -> None:
+    """按显示器真实 DPI 绘制托盘菜单。
+
+    进程默认是 DPI unaware：高分屏上 Windows 会把右键菜单当位图整体拉伸，
+    字发糊。必须在创建任何窗口之前调用，所以放在 main() 的最前面。
+    """
+    _user32.SetProcessDpiAwarenessContext.argtypes = [wintypes.HANDLE]
+    _user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
+    _user32.SetProcessDpiAwarenessContext(wintypes.HANDLE(-4))  # PER_MONITOR_AWARE_V2
+
+
 def _console_window() -> int:
     window = _kernel32.GetConsoleWindow()
     return _user32.GetAncestor(window, GA_ROOT) or window
