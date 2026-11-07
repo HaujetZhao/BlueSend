@@ -46,6 +46,7 @@ E:\repos\Bluetooth-Input\
 │   └── vite.config{,.pwa}.js   三套构建配置
 ├── pc\                         电脑端
 │   ├── server.py               GATT Server 主程序
+│   ├── single_instance.py      单实例锁（Windows 命名互斥体）
 │   ├── protocol.py             UUID 与下行分片上限
 │   ├── frame_codec.py          4 字节长度前缀帧编解码
 │   ├── clipboard.py            Win32 剪贴板读写
@@ -57,7 +58,7 @@ E:\repos\Bluetooth-Input\
 
 ## 四、怎么跑
 
-先从 PowerShell 确认没有僵尸实例——**多实例会互相抢广播，症状极难认**：
+启动时会自动检查有没有别的实例（命名互斥体），有就打印提示后直接退出。仍建议从 PowerShell 看一眼——**多实例会互相抢广播，症状极难认**，而锁只认带锁的实例：
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object ProcessId,CommandLine
@@ -148,7 +149,11 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 ### 8. 多个 `server.py` 进程同时跑会抢广播
 
-`uv run` 外面包了一层，停后台任务只杀到包装进程，真正的 python 子进程还活着。两个进程用同一个 Service UUID 各自注册、各自广播，症状是 `GATT Error Unknown`、刚连就断。启动前先按第四节的命令查一遍。
+`uv run` 外面包了一层，停后台任务只杀到包装进程，真正的 python 子进程还活着。两个进程用同一个 Service UUID 各自注册、各自广播，症状是 `GATT Error Unknown`、刚连就断。
+
+BLE 接口本身给不出「这个 Service UUID 已被占用」的信号：实测两个进程各自 `create_async` 都返回 `error: 0`，广播状态也各说各话，唯一的痕迹是互相把对方的广播挤成 3（Aborted）再恢复 2。所以走进程层——启动时先抢命名互斥体 `BluetoothInput.GattServer`，抢不到就打印提示并退出，不碰 BLE（`pc/single_instance.py`）。互斥体随进程退出由系统释放，不会留僵尸锁。
+
+它只识别同样带这把锁的实例；`E:\repos\ble` 里的旧副本和其他程序不受约束，那种情况仍要按第四节的命令人工查。
 
 ### 9. 同一页面开多个标签页也会互抢
 
