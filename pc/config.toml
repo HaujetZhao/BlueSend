@@ -1,0 +1,8 @@
+# 上屏方式。
+#
+# 默认走 SendInput（keyboard.write）。中文输入法会截获并打乱这串键盘事件，
+# Qt5 应用（微信、Telegram）里全角标点后紧跟的字会被替换成同一个标点。
+# 列在这里的进程在前台时改投 WM_CHAR，绕开输入法。
+#
+# 改完需要重启 server.py 生效。进程名不区分大小写。
+wm_char_apps = ["Weixin.exe", "Telegram.exe"]

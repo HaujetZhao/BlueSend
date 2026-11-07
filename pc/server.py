@@ -22,8 +22,10 @@ from winrt.windows.storage.streams import DataWriter
 from clipboard import get_clipboard_text, set_clipboard_text
 from frame_codec import Decoder, FrameError, encode
 from logging_setup import setup_logging
+from config import load_wm_char_apps
 from protocol import DOWNLINK_UUID, SERVICE_UUID, UPLINK_UUID, downlink_chunk_size
 from single_instance import acquire as acquire_instance_lock
+from text_input import type_text
 
 logger = logging.getLogger("ble")
 
@@ -40,6 +42,7 @@ def to_buffer(data: bytes):
 
 async def main() -> None:
     decoder = Decoder()
+    wm_char_apps = load_wm_char_apps()
 
     service_result = await GattServiceProvider.create_async(SERVICE_UUID)
     if service_result.error != BluetoothError.SUCCESS:
@@ -178,8 +181,10 @@ async def main() -> None:
     async def handle(message: dict) -> None:
         kind = message.get("t")
         if kind == "text":
-            # keyboard.write 是同步阻塞调用，长文本会占住事件循环、憋住心跳。
-            await asyncio.to_thread(keyboard.write, message.get("v", ""))
+            # 长文本会阻塞事件循环、憋住心跳；命中兼容名单时改投 WM_CHAR（见 text_input）。
+            await asyncio.to_thread(
+                type_text, message.get("v", ""), wm_char_apps
+            )
         elif kind == "key":
             keyboard.send(message.get("v", ""))
         elif kind == "clip":

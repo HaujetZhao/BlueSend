@@ -51,6 +51,9 @@ E:\repos\Bluetooth-Input\
 │   ├── protocol.py             UUID 与下行分片上限
 │   ├── frame_codec.py          4 字节长度前缀帧编解码
 │   ├── clipboard.py            Win32 剪贴板读写
+│   ├── text_input.py           上屏：默认 SendInput，兼容名单改投 WM_CHAR
+│   ├── config.py               config.toml 读取
+│   ├── config.toml             上屏兼容名单
 │   ├── tests\                  pytest
 │   └── logs\                   服务端日志（gitignore）
 ├── docs\superpowers\           历史设计与计划文档（保留原貌）
@@ -193,6 +196,12 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 - 电脑端：订阅变化（连接边界）时复位解码器；帧长上限 1 MiB；坏 UTF-8 丢弃并复位缓冲；通知分片失败时中止本条消息剩余分片。
 
 代价是失败的那条消息会丢，最坏情况是一次发送没成功加几秒重连，不会失步，也不会崩进程。
+
+### 13. 中文输入法会打乱 SendInput 的 Unicode 注入
+
+`text` 消息默认用 `keyboard.write`（SendInput + `KEYEVENTF_UNICODE`）。焦点应用挂着中文输入法时，全角中文标点后的 `KEYUP` 会被输入法吞掉，Qt5 应用（微信、Telegram）按错乱的输入法状态提交，表现为标点后第一个字被替换成同一个标点。原生控件（记事本）、CMD、PowerShell、Windows Terminal 不受影响。
+
+修法：`pc/config.toml` 的 `wm_char_apps` 列出进程名（`Weixin.exe`、`Telegram.exe`），命中的改投 `WM_CHAR`（`pc/text_input.py`）。不能全局替换——Windows Terminal 收不到 `WM_CHAR`。完整复现与证据见 [docs/ime-typing-bug.md](docs/ime-typing-bug.md)。
 
 ## 七、当前状态与已知限制
 
