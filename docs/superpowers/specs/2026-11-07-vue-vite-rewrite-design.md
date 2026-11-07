@@ -30,13 +30,13 @@
 
 约定：
 
-- 两套构建配置分开写，不参数化；各自先清空 `dist`，一次只跑一种。
+- 两套构建配置分开写，不参数化；Vite 构建时默认清空 `dist`，一次只跑一种。
 - 两种构建都保持 `base: './'`，部署在子路径下可直接工作。
 - 开发、单文件、PWA 三种形态使用同一份 `src/`，协议与 UI 行为完全一致。
 - PWA 的 service worker 与 manifest 必须是独立文件，无法内联，因此单文件构建必须是另一套配置。
 - `dist/`、`node_modules/` 加入 `.gitignore`。
 
-依赖与版本对齐 SubTap：`vue ^3.4.0`、`vite ^5.0.0`、`@vitejs/plugin-vue ^5.0.0`、`vite-plugin-singlefile ^2.0.0`、`vite-plugin-pwa ^0.20.0`、`rimraf ^6.1.3`；包管理器用 npm。
+依赖与版本对齐 SubTap：`vue ^3.4.0`、`vite ^5.0.0`、`@vitejs/plugin-vue ^5.0.0`、`vite-plugin-singlefile ^2.0.0`、`vite-plugin-pwa ^0.20.0`；包管理器用 npm。构建脚本不再引入 `rimraf`，由 Vite 的 `emptyOutDir` 负责清空产物。
 
 ## 三、目录结构
 
@@ -100,8 +100,9 @@ new BleClient({
 
 职责：
 
-- `requestDevice()`：调用 `navigator.bluetooth.requestDevice`，按 Service UUID 过滤；绑定 `gattserverdisconnected`。
-- `connect()`：取 GATT server、Service、Characteristic，开启通知，重置缓冲与写链，启动心跳看门狗。
+- `requestDevice()`：先弹出设备选择，选中后才拆除旧链路并绑定新设备；用户取消时保留原连接。
+- `connect()`：单飞，同一时刻只允许一个在途连接；取 GATT server、Service、Characteristic，开启通知，重置缓冲与写链，启动心跳看门狗。重连是否成功以实际拿到 characteristic 为准。
+- 代际校验：重新扫描、断链都会推进代际；在途连接与旧写队列的分片在代际变化后不再生效，避免迟到的失败或写入击穿新链路。
 - 写队列：所有写入串到同一条 Promise 链上；单帧按 `characteristic.maxWriteWithResponseSize || 180` 切片，逐片 `writeValueWithResponse`。
 - 收包：通知分片进入 `FrameDecoder`，凑满即分发；任何收到消息都刷新心跳超时。
 - 心跳看门狗：9 秒没有任何消息判定断链。
@@ -112,7 +113,7 @@ new BleClient({
 
 ### `src/composables/useBle.js`
 
-`createBle({ onClipboard })` 返回：
+`useBle({ onClipboard })` 返回：
 
 - `status`：`ref`，三态。
 - `lastEvent`：`ref`，最近一条链路事件文本。
@@ -131,7 +132,7 @@ new BleClient({
 - 文本输入区。
 - 经典模式的「发送」「清空」按钮组。
 - 剪贴板「拉取」「推送」按钮组。
-- 中文输入法 `composition` 状态、即时输入、粘贴拦截、快捷键处理。
+- 中文输入法 `composition` 状态、即时输入、粘贴拦截、快捷键处理。输入区用 `:value` + 单一 `@input` 管理，不依赖 `v-model` 指令与模板监听器的注册顺序。
 - 多标签页检测（`BroadcastChannel`）。
 - 拉取到的剪贴板文本写回输入框并聚焦，同时尽力写入手机剪贴板（失败只告警，不影响输入框内容）。
 
@@ -204,9 +205,12 @@ new BleClient({
   - 一帧拆成多次 `push`；
   - 一次 `push` 含多帧；
   - 含中文的 UTF-8 负载；
-  - 空对象。
-- `npm test` 执行 `node --test src/logic/*.test.js`。
-- 构建验证：`npm run build`、`npm run build:pwa` 均成功且产物符合预期。
+  - 空对象；
+  - 与 `pc/frame_codec.py` 对齐的固定字节夹具；
+  - 长度字段跨多个字节（载荷 300 字节）；
+  - 分片边界落在 UTF-8 多字节字符中间。
+- `npm test` 执行 `node --test src/logic/*.test.js`，共 8 个用例。
+- 构建验证：`npm run build`、`npm run build:pwa` 均成功且产物符合预期；单文件构建的 `dist/index.html` 会连同 `public/` 下的两张 PWA 图标一起复制，但 JS/CSS 已全部内联。
 - 开发验证：`npm run dev` 启动 HTTPS 服务，局域网内手机可打开页面。
 - 蓝牙真机验收（连接、长文本、即时输入、剪贴板双向）由用户本人完成。
 

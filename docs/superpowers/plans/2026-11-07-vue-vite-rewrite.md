@@ -1564,3 +1564,16 @@ Expected：无输出。
 6. 推送剪贴板：手机剪贴板内容覆盖电脑剪贴板。
 7. 杀掉电脑端进程，网页 9 秒内判定断开，重启电脑端后自动接回。
 ````
+
+---
+
+## 实施偏差记录
+
+执行过程中对计划原文做了以下修正，代码以此为准：
+
+1. **Task 2 脚本**：`test` 改为 `node --test src/logic/*.test.js`（Node 24 不接受裸目录参数）；移除 `rimraf`（Vite 默认清空 `outDir`）；`dev` 改为 `vite`（`server.host: true` 已在配置中）；删除会误导的 `preview` 脚本；PWA manifest 增加 `lang: 'zh-CN'`。
+2. **Task 4 BLE 生命周期加固**：`connect()` 改为单飞；引入代际校验（重新扫描、断链递增，作废在途连接与旧写队列）；重新扫描时先取到新设备再拆除旧链路，取消选择保留旧连接；重连改为 `setTimeout` 串行调度，并以实际拿到 characteristic 判定成功。这些修正解决了旧实现中迟到的连接失败击穿新链路、假 connected、重连停摆等竞态。
+3. **Task 3 测试**：在计划 5 条用例之外增加跨语言字节夹具、4 字节长度字段、UTF-8 多字节字符中间分片三条，共 8 条。
+4. **Task 6 输入区**：即时输入不再使用 `v-model` + 模板 `@input` 的组合（依赖 Vue 内部监听器注册顺序），改为 `:value="text"` + 单一 `@input`；`composing` 改为普通变量；组合期间 `keydown` 直接返回；剪贴板写回改为 async try/catch；Web Bluetooth 能力检查与提示上移到 `App.vue`。
+5. **Task 6/7 产物**：单文件构建的 `dist/` 会连同 `public/` 下两张 PWA 图标一起复制，`index.html` 本身 JS/CSS 已全部内联，体积约 80 KB。
+6. **Task 9 验证**：单文件产物约 80 KB，不采用计划里「大于 100 KB」的经验阈值；以构建成功与内联检查为准。
