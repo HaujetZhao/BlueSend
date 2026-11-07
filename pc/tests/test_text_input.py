@@ -6,13 +6,10 @@ WM_CHAR = 0x0102
 def _capture(monkeypatch, process_name):
     events = []
 
-    class FakeUser32:
-        @staticmethod
-        def PostMessageW(hwnd, message, wparam, lparam):
-            events.append(("char", hwnd, message, wparam))
-            return 1
+    def fake_post_message(hwnd, message, wparam, lparam):
+        events.append(("char", hwnd, message, wparam))
 
-    monkeypatch.setattr(text_input, "_user32", FakeUser32)
+    monkeypatch.setattr(text_input.win32gui, "PostMessage", fake_post_message)
     monkeypatch.setattr(text_input.win32gui, "GetForegroundWindow", lambda: 0x1234)
     monkeypatch.setattr(text_input, "_focused_window", lambda: 0x1234)
     monkeypatch.setattr(text_input, "_process_name", lambda _hwnd: process_name)

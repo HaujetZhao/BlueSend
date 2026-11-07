@@ -13,10 +13,9 @@ from ctypes import wintypes
 
 import keyboard
 import psutil
+import win32con
 import win32gui
 import win32process
-
-_WM_CHAR = 0x0102
 
 
 class _GuiThreadInfo(ctypes.Structure):
@@ -33,12 +32,11 @@ class _GuiThreadInfo(ctypes.Structure):
     ]
 
 
-# pywin32 没有封装 GetGUIThreadInfo，这一段仍然直接调 Win32。
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
+# pywin32 没有封装 GetGUIThreadInfo，只剩这一个 API 直接调 Win32。
+# 返回值不查：取不到焦点时 hwndFocus 为 0，_focused_window 会回落到前台窗口。
+_user32 = ctypes.WinDLL("user32")
 _user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(_GuiThreadInfo)]
 _user32.GetGUIThreadInfo.restype = wintypes.BOOL
-_user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-_user32.PostMessageW.restype = wintypes.BOOL
 
 
 def _process_name(window: int) -> str:
@@ -79,7 +77,7 @@ def _post_wm_char(text: str) -> None:
             keyboard.send("backspace")
         else:
             for unit in _utf16_units(char):
-                _user32.PostMessageW(window, _WM_CHAR, unit, 1)
+                win32gui.PostMessage(window, win32con.WM_CHAR, unit, 1)
 
 
 def type_text(text: str, wm_char_apps: set[str]) -> None:
