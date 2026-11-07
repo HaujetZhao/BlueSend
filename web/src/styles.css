@@ -35,9 +35,39 @@ body {
 
 #app {
   width: 100%;
+  /* 减去 body 上下各 20px 内边距，页脚才能贴住视口底部 */
+  min-height: calc(100dvh - 40px);
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 页脚：仓库链接，内容不满一屏时贴底 */
+.repo {
+  margin-top: auto;
+  padding-top: 18px;
+  padding-bottom: env(safe-area-inset-bottom);
+  text-align: center;
+}
+
+.repo a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #9d8fc2;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-decoration: none;
+  opacity: 0.6;
+  transition: opacity 0.18s;
+}
+
+.repo a:hover { opacity: 1; }
+
+.repo svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
 }
 
 .card {
