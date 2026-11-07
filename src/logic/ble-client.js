@@ -224,7 +224,12 @@ export class BleClient {
     if (!this.#device) return;
     try {
       await this.connect();
-      this.#reconnectFailures = 0;
+      // 被代际作废的 attempt 也会 resolve，只有真正拿到 characteristic 才算连上。
+      if (this.#characteristic) {
+        this.#reconnectFailures = 0;
+      } else {
+        this.#scheduleReconnect();
+      }
     } catch (err) {
       this.#reconnectFailures += 1;
       // 每 2 秒试一次，全记会刷屏，只记第一次和之后每 10 次。
