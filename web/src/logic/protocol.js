@@ -9,3 +9,6 @@ export const HEARTBEAT_TIMEOUT_MS = 9000;
 // 拿不到协商后的写入上限时使用，覆盖 4.2 默认 MTU。
 export const FALLBACK_WRITE_CHUNK = 180;
 export const RECONNECT_INTERVAL_MS = 2000;
+// 正常 ATT 应答不到 100 毫秒。超过这个时间还没回来，链路在实践上已经不可用，
+// 不必等满 ATT 规定的 30 秒事务超时——那段时间里所有输入都会堵在写队列里。
+export const WRITE_ACK_TIMEOUT_MS = 2000;

@@ -19,7 +19,7 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
 from winrt.windows.storage.streams import DataWriter
 
 from clipboard import get_clipboard_text, set_clipboard_text
-from frame_codec import Decoder, encode
+from frame_codec import Decoder, FrameError, encode
 from logging_setup import setup_logging
 from protocol import DOWNLINK_UUID, SERVICE_UUID, UPLINK_UUID, downlink_chunk_size
 from single_instance import acquire as acquire_instance_lock
@@ -72,15 +72,22 @@ async def main() -> None:
         跨线程完成会让 ATT 事务在 30 秒后超时，整条链路随之断开。
         取到字节后只把数据投递给 asyncio 线程，业务处理留在那边做。
         """
+        request = None
         try:
             request = args.get_request_async().get()
             data = bytes(request.value)
             # 上行只声明了 WRITE，写请求必然是带响应的，直接应答即可。
             request.respond()
+            request = None
+            loop.call_soon_threadsafe(incoming.put_nowait, data)
         except Exception:
             logger.exception("处理写入请求失败")
-            return
-        loop.call_soon_threadsafe(incoming.put_nowait, data)
+            # 取到请求却没应答，Windows 会一直等这次 ATT 事务，30 秒后整条链路断开。
+            if request is not None:
+                try:
+                    request.respond()
+                except Exception:
+                    logger.exception("补发 ATT 响应失败")
 
     uplink.add_write_requested(on_write_requested)
 
@@ -98,6 +105,9 @@ async def main() -> None:
     def on_subscribed_changed(sender, args) -> None:
         clients = list(downlink.subscribed_clients)
         logger.info("订阅变化：当前 %d 个订阅客户端", len(clients))
+        # 订阅变化只发生在连接边界。上行字节流是连接作用域的，旧连接写了一半
+        # 的帧不能带进新连接，否则长度前缀会被读成任意值，解码器永久失步。
+        loop.call_soon_threadsafe(decoder.reset)
         for client in clients:
             key = str(client.session.device_id)
             if key in watched:
@@ -122,16 +132,21 @@ async def main() -> None:
                 results = await downlink.notify_value_async(
                     to_buffer(data[i:i + size])
                 )
+                failed = False
                 for result in results:
                     if result.status != GattCommunicationStatus.SUCCESS:
                         logger.warning(
-                            "通知发送失败：%s（协议错误 %s，已发 %d 字节）",
+                            "通知发送失败：%s（协议错误 %s，已发 %d 字节），中止剩余分片",
                             result.status,
                             result.protocol_error,
                             result.bytes_sent,
                         )
+                        failed = True
                     else:
                         delivered = True
+                # 中间少了一片的字节流没法补救，继续发只会把对端带得更偏。
+                if failed:
+                    return delivered
         return delivered
 
     async def heartbeat_loop() -> None:
@@ -171,7 +186,15 @@ async def main() -> None:
 
     async def read_loop() -> None:
         while True:
-            for payload in decoder.feed(await incoming.get()):
+            try:
+                payloads = decoder.feed(await incoming.get())
+            except FrameError as err:
+                # 字节流已经对不上帧格式，继续解析只会越错越远；丢掉缓冲，
+                # 等下一个连接边界重建（对端写失败也会断开重连）。
+                decoder.reset()
+                logger.warning("上行字节流异常，已丢弃缓冲：%s", err)
+                continue
+            for payload in payloads:
                 logger.info("收到消息 %s", payload[:200])
                 # 收到的是链路对端（可能是任意一台设备）发来的字节，坏消息不该拖垮整个服务
                 try:

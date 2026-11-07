@@ -5,8 +5,22 @@ import {
   HEARTBEAT_TIMEOUT_MS,
   FALLBACK_WRITE_CHUNK,
   RECONNECT_INTERVAL_MS,
+  WRITE_ACK_TIMEOUT_MS,
 } from './protocol.js';
 import { encodeFrame, FrameDecoder } from './frame-codec.js';
+
+// 带响应写的 Promise 只有在收到 ATT 响应时才 settle。链路半断时它可能一直
+// 挂着，所以在这里加一道上限；超时后调用方会主动断开链路。
+function writeWithTimeout(write) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`等待 ATT 响应超过 ${WRITE_ACK_TIMEOUT_MS} 毫秒`)),
+      WRITE_ACK_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([write, timeout]).finally(() => clearTimeout(timer));
+}
 
 export class BleClient {
   #onState;
@@ -183,17 +197,27 @@ export class BleClient {
       // 链路已经换了或断了，旧队列里的分片不再写。
       if (generation !== this.#generation) return;
       // 必须用带响应写：只有它由 ATT 保证先后顺序，无响应写会让分片乱序。
-      await uplink.writeValueWithResponse(frame.subarray(i, i + size));
+      await writeWithTimeout(
+        uplink.writeValueWithResponse(frame.subarray(i, i + size)),
+      );
     }
   }
 
   #onDeviceDisconnect = () => this.#handleDrop('物理断开');
 
   #onNotify = (event) => {
+    if (!this.#link) return;
     const view = event.target.value;
     const chunk = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-    for (const message of this.#decoder.push(chunk)) {
-      this.#dispatch(message);
+    try {
+      for (const message of this.#decoder.push(chunk)) {
+        this.#dispatch(message);
+      }
+    } catch (err) {
+      // 字节流已经和帧格式对不上，继续解析只会越错越远；
+      // 断开重连，让两端从干净状态开始。
+      console.error('接收数据解析失败', err);
+      this.#handleDrop('接收数据解析失败');
     }
   };
 
@@ -232,6 +256,9 @@ export class BleClient {
     this.#link = null;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
+    // 写失败或心跳超时不代表链路已经断了。主动断开，电脑端才能看到会话结束、
+    // 清掉它那边的半帧缓冲；否则重连会继续用一条已经失步的流。
+    if (this.#device?.gatt?.connected) this.#device.gatt.disconnect();
     const text = `第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`;
     // 还没对外宣布连上就断了，说明是后台重连过程中的失败，不刷前台。
     if (this.#announced) {
