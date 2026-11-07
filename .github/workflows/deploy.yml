@@ -24,6 +24,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          # 前端在 web/ 子目录，缓存步骤默认只看仓库根，必须指过去
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
       # 帧编解码单测，坏代码不进 Pages
