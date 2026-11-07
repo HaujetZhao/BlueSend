@@ -87,6 +87,15 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 
 改协议时，`protocol.md`、`server/core/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
+## 打包电脑端 exe
+
+```powershell
+cd server
+uv run pyinstaller BlueSend.spec
+```
+
+产物在 `server/dist/BlueSend/`，整个目录压缩后即可分发，目标机器不需要装 Python。`core/` 以源文件形式随包发布，改配置或代码后重启 exe 即生效。
+
 ## 发布
 
 在线版由 GitHub Actions 构建：推送到 `main`，或在 Actions 页面手动触发 `Deploy to GitHub Pages`。工作流在 `web/` 目录下依次跑 `npm ci`、`npm test`、`npm run build:pwa`，再把 `web/dist/` 发布出去。

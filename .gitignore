@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 .pytest_cache/
+build/
 .trash/
 server/logs/
 node_modules/

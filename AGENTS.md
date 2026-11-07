@@ -46,7 +46,11 @@ E:\repos\BlueSend\
 │   └── vite.config{,.pwa}.js   三套构建配置
 ├── server\                     电脑端
 │   ├── main.py                 入口：日志、单实例锁、启动
+│   ├── BlueSend.spec           PyInstaller 打包配置
+│   ├── build_hook.py           runtime hook：把 exe 目录加进 sys.path
+│   ├── assets\icon.ico         程序图标
 │   ├── core\                   电脑端包
+│   │   ├── paths.py            应用根目录（源码=server/，打包后=exe 目录）
 │   │   ├── server.py           GATT Server 主程序
 │   │   ├── logging_setup.py    日志配置（控制台 rich 上色，文件精确到毫秒）
 │   │   ├── single_instance.py  单实例锁（Windows 命名互斥体）
@@ -101,6 +105,28 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
 电脑端单测：`cd server && uv run pytest`。
+
+### 打包 exe
+
+```powershell
+cd E:\repos\BlueSend\server
+uv run pyinstaller BlueSend.spec
+```
+
+产物在 `server\dist\BlueSend\`：
+
+```text
+BlueSend.exe
+internal\     第三方依赖与 Python 运行时（PyInstaller 生成）
+core\         Python 源文件（含 config.toml、upload_page.html）
+logs\         首次运行生成
+```
+
+- `core\` 不进 PYZ，是可直接编辑的源文件：改配置或代码后重启 exe 即生效，不用重新打包。`build_hook.py` 把 exe 目录插进 `sys.path`，冻结后的程序才导入得到它。代价是 core 与 internal 里的依赖版本不匹配时只能自己收拾。
+- 日志按「应用根目录」定位（`core/paths.py`），打包后就是 exe 所在目录。PyInstaller 冻结运行时不写字节码，`core\` 下不会生成 `__pycache__`。
+- 版本号取自 `pyproject.toml`，图标是 `server\assets\icon.ico`（由 `web\public\icon-512.png` 生成）。
+- onedir 形态，整个 `BlueSend\` 目录压缩后即可分发；目标机器不需要装 Python。Windows 防火墙首次仍会询问是否允许访问网络。
+- `dist/`、`build/` 都不入库。
 
 ## 五、协议速查
 

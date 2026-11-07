@@ -32,7 +32,7 @@ dist/BlueSend/
 
 - **改配置和代码不用重新打包。** `core/config.toml` 就在旁边，改完重启 exe 生效；临时调一行 Python 也是改完即生效。
 - **路径解析不用特殊处理。** `core/config.py` 的 `Path(__file__).parent / "config.toml"`、`core/upload_server.py` 的 `Path(__file__).with_name("upload_page.html")` 在源码和打包两种形态下都指向真文件，一行不用改。
-- 首次运行会在 `core/` 下生成 `__pycache__`，属正常。
+- PyInstaller 冻结运行时不写字节码，`core/` 下不会生成 `__pycache__`（实测）。
 
 代价：改坏 `core/` 后与 `internal/` 里的依赖版本不匹配，需要用户自己收拾。这是自用工具，接受。
 
@@ -106,7 +106,7 @@ uv run pyinstaller BlueSend.spec
 
 - `uv run pyinstaller BlueSend.spec` 一次构建通过，产物在 `server/dist/BlueSend/`。
 - 双击 `BlueSend.exe`，控制台出现「广播状态：2」与文件上传入口 URL。
-- 首次运行后 `dist/BlueSend/logs/` 出现日志，`dist/BlueSend/core/__pycache__` 生成。
+- 首次运行后 `dist/BlueSend/logs/` 出现日志。
 - `dist/BlueSend/core/config.toml` 存在且可编辑；改动是否生效由真机验证（例如改 `upload.folder` 后上传文件落在新目录）。
 - `cd server && uv run pytest` 照常通过。
 - 手机真机连接、上屏、剪贴板、传文件由用户本人验证。
