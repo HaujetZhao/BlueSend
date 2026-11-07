@@ -15,6 +15,7 @@ dist/BlueSend/
 ├── BlueSend.exe
 ├── internal/       第三方依赖、winrt 投影包与 Python 运行时（PyInstaller 生成）
 ├── core/           Python 源文件，含 config.toml、upload_page.html
+├── assets/         托盘图标
 └── logs/           首次运行自动生成
 ```
 
@@ -114,6 +115,6 @@ uv run pyinstaller BlueSend.spec
 ## 不做
 
 - GitHub Actions 发布工作流。
-- 托盘图标、无控制台模式。
+- 托盘图标、无控制台模式。（当天后续已补系统托盘，见 [托盘与启动引导](2026-11-07-tray-icon-design.md)；窗口仍保留，只是启动后隐藏。）
 - 单文件 exe。
 - 自动更新。

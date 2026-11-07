@@ -45,7 +45,7 @@ E:\repos\BlueSend\
 │   ├── certs\{cert,key}.pem    自签证书，dev server 用
 │   └── vite.config{,.pwa}.js   三套构建配置
 ├── server\                     电脑端
-│   ├── main.py                 入口：日志、单实例锁、启动
+│   ├── main.py                 入口：DPI 声明、日志、单实例锁、启动与重启
 │   ├── BlueSend.spec           PyInstaller 打包配置
 │   ├── build_hook.py           runtime hook：把 exe 目录加进 sys.path
 │   ├── assets\icon.ico         程序图标
@@ -265,6 +265,10 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 
 必须守住的点：① 探测请求要显式声明 `targetAddressSpace`，否则混合内容检查在 DNS 之前就把请求拦了；② 权限还是 prompt 时不要自动探测，浏览器会静默拒绝；③ 不要把上传逻辑搬回主页面用 fetch 直传——要处理 CORS 与预检，首次仍要授权，没有收益。也别让电脑跑自签 HTTPS：手机要装一次 CA，证书还绑局域网 IP，换网络就失效。
 
+### 16. 托盘菜单在高分屏上发糊：进程必须声明 DPI 感知
+
+进程默认 DPI unaware，Windows 会把托盘右键菜单当位图整体拉伸，高分屏上字发糊。`main()` 第一行调用 `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`，必须早于任何窗口创建；声明后 pystray 每次右键新建的菜单按当前显示器 DPI 绘制。实测打包进程的 `GetProcessDpiAwareness` 返回 2（见 `server/core/tray.py` 的 `enable_dpi_awareness`）。
+
 ## 七、当前状态与已知限制
 
 **已实测通过：**
@@ -283,6 +287,7 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 - 切后台 / 锁屏回来后的重连。
 - 长时间挂机（十几分钟以上、跨锁屏）的稳定性。
 - 多标签页提示。
+- 托盘四项菜单的实际交互，以及高分屏下右键菜单的观感（DPI 修复后）。
 
 **已知限制：**
 
@@ -294,6 +299,7 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 - 文件上传要求手机与电脑在同一局域网；Windows 防火墙首次需放行 python 入站，否则上传页打不开（蓝牙不受影响）。
 - 文件上传结果不回流蓝牙：进度只在上传页显示，主页面不感知。
 - 传输途中强制关闭电脑端（Ctrl+C）时，目标目录可能残留隐藏的 `.bt-upload-*.part`，手动删除即可。
+- 在 Windows Terminal 里运行时，托盘隐藏控制台会连带隐藏整个终端窗口（所有标签页）；双击 exe 走 conhost，只影响本窗口。
 
 ## 八、调试手法
 
