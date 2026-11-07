@@ -8,7 +8,7 @@
 
 技术路线已定：**电脑做 BLE 外设，手机开网页连上去**。选 BLE 而不是 RFCOMM，唯一的理由是手机端能用网页——不用装 App、不用过应用商店；代价是 Windows 侧只能自己用 WinRT 写 GATT Server（没有成熟的高层库）。
 
-**仓库现状**：`E:\repos\Bluetooth-Input`，`main` 分支，`origin` 指向 GitHub。最新提交 `17b4e60`，**尚未 push**。
+**仓库现状**：`E:\repos\Bluetooth-Input`，前端已迁到 `refactor/vue` 分支（Vue 3 + Vite），`main` 仍是旧的原生 JS 前端。`origin` 指向 GitHub。
 
 血缘：代码最初在 `E:\repos\ble` 里成形（那里还试过原生 Android App 路线，卡在「30 秒自动断开」），2026-11-07 合并进本仓库。`E:\repos\ble` 现在是冻结的旧副本，没有价值，可以随时丢弃；原生 App 源码在本仓库的 `.trash/android-legacy-2026-11-07/`（`.trash/` 不入库）。
 
@@ -47,12 +47,37 @@ E:\repos\Bluetooth-Input\
 
 ## 四、怎么跑
 
+先从 PowerShell 确认没有僵尸实例——**多实例会互相抢广播，症状极难认**：
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object ProcessId,CommandLine
+```
+
+再启动电脑端：
+
+```powershell
+cd E:\repos\Bluetooth-Input\pc
+uv run python server.py
+```
+
+看到 `广播状态：Started`（数值 2）就是在等手机连接。日志同时写 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。
+
+手机端两种访问方式：
+
+- **在线版**：`https://haujetzhao.github.io/Bluetooth-Input/`（需要先把当前前端部署上去）
+- **本地开发**：电脑运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书
+- **单文件本地托管**：`npm run build` 后运行 `uv run --project pc python serve_web.py`，手机打开 `https://<电脑局域网IP>:8443`
+
+连上后点「扫描连接」→ 选中电脑。页面状态栏下面那行小字会写「已连接（第 N 段）」，断开时写原因和上一段存活时长。
+
+前端命令：
+
 ```powershell
 npm install
-npm run dev                    # 手机打开 https://<局域网IP>:5173
-npm run build                  # 单文件产物
-npm run build:pwa              # PWA 产物
-uv run --project pc python serve_web.py   # 托管 dist/，端口 8443
+npm run dev        # HTTPS 开发服务器，手机可访问
+npm test           # 帧编解码单测
+npm run build      # 单文件产物 dist/index.html
+npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
 ## 五、踩过的坑
