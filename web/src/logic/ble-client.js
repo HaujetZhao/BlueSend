@@ -36,6 +36,7 @@ export class BleClient {
   #onClipboard;
   #onBench;
   #onReceiveProgress;
+  #onNet;
 
   #device = null;
   // 上下行两条特征值永远同时存在，用一次赋值一起拿进来，不作分别判空。
@@ -68,12 +69,13 @@ export class BleClient {
   // 刚收到的下行测速载荷，留着给随后的 benchend 做内容校验。
   #benchPayload = '';
 
-  constructor({ onState, onEvent, onClipboard, onBench, onReceiveProgress }) {
+  constructor({ onState, onEvent, onClipboard, onBench, onReceiveProgress, onNet }) {
     this.#onState = onState;
     this.#onEvent = onEvent;
     this.#onClipboard = onClipboard;
     this.#onBench = onBench;
     this.#onReceiveProgress = onReceiveProgress;
+    this.#onNet = onNet;
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
   }
 
@@ -240,6 +242,8 @@ export class BleClient {
     this.#device = null;
     this.#link = null;
     this.#announced = false;
+    // 上传入口是连接作用域的，旧链路的地址不能带进下一次连接。
+    this.#onNet([]);
     // 换了设备（或销毁）时，旧设备积压的消息不该发给新设备。
     // dispose() 走的就是这里，不必再清一遍。
     this.#outbox.length = 0;
@@ -332,6 +336,10 @@ export class BleClient {
         // 电脑端按协商出的 MTU 算的单片上限，连接边界会复位成 ATT 最小值。
         this.#uplinkLimit = message.up;
         break;
+      case 'net':
+        // 电脑托管的文件上传入口。连接作用域，断开时清空。
+        this.#onNet(message.hosts);
+        break;
       case 'benchdata':
         // 载荷没有业务含义，但要留着：benchend 到达时拿它重算哈希，验分片顺序。
         this.#benchPayload = message.v;
@@ -373,6 +381,7 @@ export class BleClient {
     this.#dropCount += 1;
     clearTimeout(this.#heartbeatTimer);
     this.#link = null;
+    this.#onNet([]);
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     this.#uplinkSeq = 0;

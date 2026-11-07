@@ -1,7 +1,7 @@
 import { ref, computed, onUnmounted } from 'vue';
 import { BleClient } from '../logic/ble-client.js';
 
-export function useBle({ onClipboard, onBench, onReceiveProgress }) {
+export function useBle({ onClipboard, onBench, onReceiveProgress, onNet }) {
   const status = ref('disconnected');
   const lastEvent = ref('尚未连接');
 
@@ -17,6 +17,7 @@ export function useBle({ onClipboard, onBench, onReceiveProgress }) {
     onClipboard,
     onBench,
     onReceiveProgress,
+    onNet,
   });
 
   onUnmounted(() => client.dispose());

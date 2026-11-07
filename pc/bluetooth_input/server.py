@@ -31,6 +31,7 @@ from .protocol import (
     downlink_chunk_size,
 )
 from .text_input import type_text
+from .upload_server import start_upload_server
 
 logger = logging.getLogger("ble")
 
@@ -84,6 +85,11 @@ async def serve() -> None:
         raise SystemExit(1)
     downlink = downlink_result.characteristic
     logger.info("下行特征值已创建 %s（电脑通知）", DOWNLINK_UUID)
+
+    # 文件上传走局域网 HTTP：蓝牙只负责把入口 URL 送到手机。入口地址随 net
+    # 消息在每次订阅变化时下发（连接作用域，同 mtu）。
+    uploads = start_upload_server()
+    logger.info("文件上传入口：%s", "、".join(uploads.urls()) or "没有可用的局域网地址")
 
     loop = asyncio.get_running_loop()
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
@@ -167,6 +173,14 @@ async def serve() -> None:
             # 所以每次订阅变化都要重新下发，不能按设备去重——漏一次，手机端
             # 就整条连接按 20 字节切。
             on_max_notification_size_changed(client, None)
+        if clients:
+            # 上传入口同样是连接作用域的。地址在重新连接时现算一次，电脑换了
+            # 网络也能拿到新地址。
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(
+                    notify({"t": "net", "hosts": uploads.urls()})
+                )
+            )
 
     downlink.add_subscribed_clients_changed(on_subscribed_changed)
 
@@ -321,4 +335,5 @@ async def serve() -> None:
     finally:
         heartbeat.cancel()
         provider.stop_advertising()
+        uploads.stop()
         logger.info("停止广播")

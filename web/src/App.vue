@@ -12,6 +12,10 @@ let composing = false;
 const hasTriedConnect = ref(false);
 // 测速期间两颗按钮都锁住：一次只跑一个方向。
 const benching = ref(false);
+// 电脑下发的上传入口（连接作用域）与当前选中的候选。候选通常只有一个；
+// 多网卡时第一个是默认路由所在网卡，打不开再由「换个入口」手动切换。
+const uploadLinks = ref([]);
+const uploadSlot = ref(0);
 
 const {
   status,
@@ -26,11 +30,16 @@ const {
   onClipboard: applyPulledClipboard,
   onBench: showBenchResult,
   onReceiveProgress: showReceiveProgress,
+  onNet: (hosts) => {
+    uploadLinks.value = hosts;
+    uploadSlot.value = 0;
+  },
 });
 
 const statusLabel = computed(
   () => ({ disconnected: '未连接', connecting: '连接中', connected: '已连接' })[status.value],
 );
+const canUpload = computed(() => connected.value && uploadLinks.value.length > 0);
 const placeholder = computed(() => {
   if (status.value === 'connecting') return '正在重新连接，请稍候…';
   if (status.value === 'connected') {
@@ -167,6 +176,20 @@ function onKeydown(event) {
 function pullClipboard() {
   restoreInputFocus();
   send({ t: 'pull' });
+}
+
+// 打开电脑托管的上传页。必须在点击回调里同步调用 window.open，异步打开会被
+// 浏览器当弹窗拦截。传完的结果不会回到这里——上传页自己显示进度。
+function openUpload(next) {
+  const hosts = uploadLinks.value;
+  if (!hosts.length) return;
+  if (next) uploadSlot.value = (uploadSlot.value + 1) % hosts.length;
+  const opened = window.open(hosts[uploadSlot.value], '_blank');
+  note(
+    opened
+      ? `已打开上传页（入口 ${uploadSlot.value + 1}/${hosts.length}）`
+      : '浏览器拦截了新标签页，请允许弹窗后重试',
+  );
 }
 
 async function pushClipboard() {
@@ -368,6 +391,26 @@ onUnmounted(() => tabChannel.close());
           <path d="M12 20V6" /><path d="M6 11l6-6 6 6" />
         </svg>
         推送剪贴板
+      </button>
+    </div>
+
+    <div class="file-group">
+      <button class="btn-file" :disabled="!canUpload" @click="openUpload(false)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M12 18v-6" />
+          <path d="M9 15l3-3 3 3" />
+        </svg>
+        发送文件
+      </button>
+      <button
+        v-if="uploadLinks.length > 1"
+        class="btn-alt-host"
+        :disabled="!connected"
+        @click="openUpload(true)"
+      >
+        换个入口
       </button>
     </div>
 

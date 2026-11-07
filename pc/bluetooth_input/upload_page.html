@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>发送文件到电脑</title>
+<style>
+  :root {
+    --text-color: #f4f4f7;
+    --text-muted: #9aa0ae;
+    --primary-color: #6366f1;
+    --success-color: #10b981;
+    --error-color: #ef4444;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC',
+      'MiSans', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    background:
+      radial-gradient(900px 620px at 12% -12%, rgba(99, 102, 241, 0.3), transparent 62%),
+      radial-gradient(760px 520px at 112% 112%, rgba(168, 85, 247, 0.2), transparent 60%),
+      linear-gradient(180deg, #0c0c14, #09090e 70%);
+    color: var(--text-color);
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 20px 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  main {
+    width: 100%;
+    max-width: 460px;
+    margin-top: 10px;
+    padding: 20px;
+    background: linear-gradient(180deg, rgba(32, 32, 46, 0.78), rgba(17, 17, 26, 0.92));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 22px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  h1 {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .hint {
+    margin-top: 6px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  .pick {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 16px;
+    height: 52px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #aab3ff;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.28);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+
+  .pick:hover {
+    background: rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.5);
+  }
+
+  .pick:active {
+    transform: scale(0.985);
+  }
+
+  .list {
+    margin-top: 16px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .item {
+    padding: 12px 14px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 14px;
+  }
+
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 12.5px;
+  }
+
+  .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .size {
+    flex: none;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .bar {
+    height: 4px;
+    margin-top: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .fill {
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--primary-color), #a855f7);
+    transition: width 0.2s ease;
+  }
+
+  .item.failed .fill {
+    background: var(--error-color);
+  }
+
+  .status {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .status.failed {
+    color: var(--error-color);
+  }
+
+  .summary {
+    margin-top: 16px;
+    min-height: 16px;
+    font-size: 11.5px;
+    color: var(--success-color);
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>发送文件到电脑</h1>
+  <p class="hint">文件会保存到电脑的「下载」文件夹。可以多选，按顺序逐个上传。</p>
+
+  <label class="pick">
+    选择文件
+    <input id="picker" type="file" multiple hidden>
+  </label>
+
+  <ul id="list" class="list"></ul>
+  <p id="summary" class="summary"></p>
+</main>
+
+<script>
+  const token = new URLSearchParams(location.search).get('t') || '';
+  const picker = document.getElementById('picker');
+  const list = document.getElementById('list');
+  const summary = document.getElementById('summary');
+
+  const queue = [];
+  let running = false;
+  let done = 0;
+  let failed = 0;
+
+  picker.addEventListener('change', () => {
+    for (const file of picker.files) {
+      queue.push({ file, row: addRow(file) });
+    }
+    picker.value = '';
+    run();
+  });
+
+  async function run() {
+    if (running) return;
+    running = true;
+    done = 0;
+    failed = 0;
+    summary.textContent = '';
+    while (queue.length) {
+      await upload(queue.shift());
+    }
+    running = false;
+    summary.textContent = failed
+      ? `已结束：完成 ${done} 个，失败 ${failed} 个`
+      : `全部完成，共 ${done} 个文件`;
+  }
+
+  // 半开连接（换 WiFi、电脑睡眠）下 xhr 既不 onload 也不 onerror，队列会永远
+  // 停在这个文件上。按「多久没有进度」判死，而不是限制总时长——大文件本就慢。
+  const STALL_TIMEOUT_MS = 30000;
+
+  function upload({ file, row }) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      let timer = null;
+      let settled = false;
+
+      function settle(ok, text) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (ok) done += 1;
+        else failed += 1;
+        setRow(row, ok ? 1 : null, text);
+        resolve();
+      }
+
+      function pet() {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          xhr.abort();
+          settle(false, '失败：长时间没有进度');
+        }, STALL_TIMEOUT_MS);
+      }
+
+      xhr.open('POST', '/upload?t=' + encodeURIComponent(token));
+      xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+      xhr.upload.onprogress = (event) => {
+        pet();
+        if (!event.lengthComputable) return;
+        const ratio = event.loaded / event.total;
+        setRow(row, ratio, `上传中 ${Math.floor(ratio * 100)}%`);
+      };
+      xhr.onload = () => {
+        let body = {};
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          // 非 JSON 响应只可能是服务端的错误页，按状态码报。
+        }
+        if (xhr.status === 200 && body.ok) {
+          settle(true, '完成');
+        } else {
+          settle(false, '失败：' + (body.error || 'HTTP ' + xhr.status));
+        }
+      };
+      xhr.onerror = () => settle(false, '失败：网络中断');
+      xhr.onabort = () => settle(false, '失败：传输已中断');
+      setRow(row, 0, '上传中…');
+      pet();
+      xhr.send(file);
+    });
+  }
+
+  function addRow(file) {
+    const item = document.createElement('li');
+    item.className = 'item';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = file.name;
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = formatSize(file.size);
+    meta.append(name, size);
+
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const fill = document.createElement('div');
+    fill.className = 'fill';
+    bar.append(fill);
+
+    const status = document.createElement('div');
+    status.className = 'status';
+    status.textContent = '等待中';
+
+    item.append(meta, bar, status);
+    list.append(item);
+    return { item, fill, status };
+  }
+
+  function setRow(row, ratio, text) {
+    row.status.textContent = text;
+    if (ratio === null) {
+      row.item.classList.add('failed');
+      row.status.classList.add('failed');
+      return;
+    }
+    row.fill.style.width = (ratio * 100).toFixed(1) + '%';
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+</script>
+</body>
+</html>

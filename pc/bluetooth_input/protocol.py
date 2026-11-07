@@ -24,6 +24,9 @@ def downlink_chunk_size(reported: int) -> int:
 # 测速载荷大小：每次测速固定 256 KB。与 web/src/logic/protocol.js 保持一致。
 BENCH_BYTES = 256 * 1024
 
+# 文件上传服务的首选端口；被占用时回退到系统临时端口，实际端口随 net 消息下发。
+UPLOAD_PORT = 8377
+
 
 def bench_payload() -> str:
     """每次随机生成测速载荷。
