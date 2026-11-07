@@ -23,6 +23,8 @@ export class BleClient {
   #connectedAt = 0;
   #dropCount = 0;
   #reconnectFailures = 0;
+  // 本轮连接是否已经对外宣布；没宣布就断的是后台重连过程中的失败。
+  #announced = false;
   #pendingLogs = [];
   #connecting = null;
   #generation = 0;
@@ -71,13 +73,13 @@ export class BleClient {
   async #doConnect() {
     const generation = this.#generation;
     try {
-      this.#onState('connecting');
       const server = await this.#device.gatt.connect();
       const service = await server.getPrimaryService(SERVICE_UUID);
       const uplink = await service.getCharacteristic(UPLINK_UUID);
       const downlink = await service.getCharacteristic(DOWNLINK_UUID);
       if (generation !== this.#generation || this.#disposed) return;
       this.#link = { uplink, downlink };
+      this.#announced = false;
       // Chrome 把订阅状态缓存在特征值对象上：电脑端重启后，startNotifications
       // 会以为自己还订阅着而直接返回，CCCD 一次都不写，Windows 端就永远收不到订阅。
       // 先取消一次，再订阅，可以逼它把 CCCD 重新写一遍。未订阅时取消会抛错，属预期。
@@ -90,7 +92,17 @@ export class BleClient {
       this.#noteAlive();
       this.#stopReconnect();
       this.#connectedAt = Date.now();
-      this.#note(`已连接（第 ${this.#dropCount + 1} 段）`);
+      // 「已连接」这条日志兼作探针：电脑端重启后 Chrome 还在用旧 GATT 句柄，
+      // 这次写必然失败。写成功才对外宣布连上，写失败就静默丢弃、继续后台重连。
+      const text = `已连接（第 ${this.#dropCount + 1} 段）`;
+      try {
+        await this.#queue(this.#link, { t: 'log', v: text }, generation);
+      } catch {
+        return;
+      }
+      if (generation !== this.#generation || this.#disposed) return;
+      this.#announced = true;
+      this.#emit(text);
       this.#flushPendingLogs();
       this.#onState('connected');
     } catch (err) {
@@ -105,17 +117,22 @@ export class BleClient {
   send(message) {
     const link = this.#link;
     if (!link) return false;
-    const generation = this.#generation;
-    const frame = encodeFrame(message);
-    this.#writeChain = this.#writeChain
-      .then(() => this.#writeFrame(link.uplink, frame, generation))
-      .catch((err) => {
-        console.error('发送失败', message.t, err);
-        if (generation === this.#generation) {
-          this.#handleDrop('写入失败：' + err.message);
-        }
-      });
+    this.#queue(link, message, this.#generation);
     return true;
+  }
+
+  #queue(link, message, generation) {
+    const frame = encodeFrame(message);
+    const write = this.#writeChain.then(() =>
+      this.#writeFrame(link.uplink, frame, generation),
+    );
+    this.#writeChain = write.catch((err) => {
+      console.error('发送失败', message.t, err);
+      if (generation === this.#generation) {
+        this.#handleDrop('写入失败：' + err.message);
+      }
+    });
+    return write;
   }
 
   dispose() {
@@ -133,15 +150,20 @@ export class BleClient {
     const device = this.#device;
     this.#device = null;
     this.#link = null;
+    this.#announced = false;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
     device?.gatt?.disconnect();
   }
 
-  #note(text) {
+  #emit(text) {
     console.info(text);
     this.#onEvent(text);
+  }
+
+  #note(text) {
+    this.#emit(text);
     if (this.#link) {
       this.send({ t: 'log', v: text });
     } else {
@@ -210,7 +232,14 @@ export class BleClient {
     this.#link = null;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
-    this.#note(`第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`);
+    const text = `第 ${this.#dropCount} 次断开：${reason}，上一段连接存活 ${lasted} 秒`;
+    // 还没对外宣布连上就断了，说明是后台重连过程中的失败，不刷前台。
+    if (this.#announced) {
+      this.#announced = false;
+      this.#note(text);
+    } else {
+      console.info(text);
+    }
     this.#onState('disconnected');
     this.#scheduleReconnect();
   };
@@ -235,9 +264,9 @@ export class BleClient {
       }
     } catch (err) {
       this.#reconnectFailures += 1;
-      // 每 2 秒试一次，全记会刷屏，只记第一次和之后每 10 次。
+      // 后台重连失败不刷前台，只留控制台；每 10 次记一条避免刷屏。
       if (this.#reconnectFailures === 1 || this.#reconnectFailures % 10 === 0) {
-        this.#note(`重连失败 ${this.#reconnectFailures} 次：${err.message}`);
+        console.warn(`重连失败 ${this.#reconnectFailures} 次：${err.message}`);
       }
       this.#scheduleReconnect();
     }
