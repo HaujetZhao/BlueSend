@@ -69,7 +69,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 ├── pc/                     电脑端，WinRT GATT Server
 ├── .github/workflows/      GitHub Actions：构建 PWA 并发布到 Pages
 ├── protocol.md             协议：UUID、帧格式、消息类型
-├── docs/HANDOFF.md         开发交接文档
+├── AGENTS.md               项目说明与开发约定
 └── readme.md
 ```
 

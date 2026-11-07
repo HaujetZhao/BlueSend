@@ -3,7 +3,7 @@
 日期：2026-11-07
 分支：`refactor/vue`
 
-> 后续变更：前端已收进 `web/`，`serve_web.py` 已移除（本地一律用 `npm run dev`），Pages 改由 `.github/workflows/deploy.yml` 构建。本文保留当日设计原貌，当前结构以 `docs/HANDOFF.md` 为准。
+> 后续变更：前端已收进 `web/`，`serve_web.py` 已移除（本地一律用 `npm run dev`），Pages 改由 `.github/workflows/deploy.yml` 构建。本文保留当日设计原貌，当前结构以仓库根目录的 `AGENTS.md` 为准。
 
 ## 一、背景与目标
 

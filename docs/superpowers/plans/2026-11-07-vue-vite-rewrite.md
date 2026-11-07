@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> 后续变更：前端已收进 `web/`，`serve_web.py` 已移除，Pages 改由 GitHub Actions 构建。下文路径为当日原貌，当前结构以 `docs/HANDOFF.md` 为准。
+> 后续变更：前端已收进 `web/`，`serve_web.py` 已移除，Pages 改由 GitHub Actions 构建。下文路径为当日原貌，当前结构以仓库根目录的 `AGENTS.md` 为准。
 
 **Goal:** 把手机端页面从原生 JS 重写为 Vue 3 + Vite 工程，界面与行为保持不变，支持开发、单文件、PWA 三种运行形态。
 
