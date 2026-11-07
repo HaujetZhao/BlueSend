@@ -46,6 +46,7 @@ E:\repos\Bluetooth-Input\
 │   └── vite.config{,.pwa}.js   三套构建配置
 ├── pc\                         电脑端
 │   ├── server.py               GATT Server 主程序
+│   ├── logging_setup.py        日志配置（控制台 rich 上色，文件精确到毫秒）
 │   ├── single_instance.py      单实例锁（Windows 命名互斥体）
 │   ├── protocol.py             UUID 与下行分片上限
 │   ├── frame_codec.py          4 字节长度前缀帧编解码
