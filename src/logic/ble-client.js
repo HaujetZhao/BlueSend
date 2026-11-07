@@ -102,12 +102,15 @@ export class BleClient {
   send(message) {
     const characteristic = this.#characteristic;
     if (!characteristic) return false;
+    const generation = this.#generation;
     const frame = encodeFrame(message);
     this.#writeChain = this.#writeChain
-      .then(() => this.#writeFrame(characteristic, frame))
+      .then(() => this.#writeFrame(characteristic, frame, generation))
       .catch((err) => {
         console.error('发送失败', message.t, err);
-        this.#handleDrop('写入失败：' + err.message);
+        if (generation === this.#generation) {
+          this.#handleDrop('写入失败：' + err.message);
+        }
       });
     return true;
   }
@@ -149,11 +152,11 @@ export class BleClient {
     }
   }
 
-  async #writeFrame(characteristic, frame) {
+  async #writeFrame(characteristic, frame, generation) {
     const size = characteristic.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
     for (let i = 0; i < frame.length; i += size) {
       // 链路已经换了或断了，旧队列里的分片不再写。
-      if (characteristic !== this.#characteristic) return;
+      if (generation !== this.#generation) return;
       // 有响应写由 ATT 保证先后顺序，这正是无响应写分片乱序的根源。
       await characteristic.writeValueWithResponse(frame.subarray(i, i + size));
     }
@@ -194,6 +197,7 @@ export class BleClient {
 
   #handleDrop = (reason) => {
     if (this.#disposed || !this.#characteristic) return;
+    this.#generation += 1;
     const lasted = this.#connectedAt
       ? ((Date.now() - this.#connectedAt) / 1000).toFixed(1)
       : '未知';
