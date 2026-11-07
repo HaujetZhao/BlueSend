@@ -3,5 +3,7 @@ __pycache__/
 .pytest_cache/
 .trash/
 pc/logs/
+node_modules/
+dist/
 .idea/
 .DS_Store
