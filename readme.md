@@ -42,6 +42,8 @@ uv run python server.py
 
 **单文件本地托管**：
 
+以下命令在仓库根目录执行：
+
 ```powershell
 npm run build
 uv run --project pc python serve_web.py
@@ -87,7 +89,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 ```powershell
 npm run dev        # HTTPS 开发服务器，手机可访问
 npm test           # 帧编解码单测
-npm run build      # 单文件产物 dist/index.html
+npm run build      # 单文件产物 dist/index.html（`public/` 下的 PWA 图标也会一并复制到 dist/）
 npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 

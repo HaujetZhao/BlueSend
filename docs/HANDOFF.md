@@ -62,7 +62,7 @@ uv run python server.py
 
 看到 `广播状态：Started`（数值 2）就是在等手机连接。日志同时写 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。
 
-手机端两种访问方式：
+手机端三种访问方式：
 
 - **在线版**：`https://haujetzhao.github.io/Bluetooth-Input/`（需要先把当前前端部署上去）
 - **本地开发**：电脑运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书

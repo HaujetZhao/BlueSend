@@ -5,7 +5,7 @@ import { useBle } from './composables/useBle.js';
 const instantMode = ref(true);
 const text = ref('');
 const inputEl = ref(null);
-const composing = ref(false);
+let composing = false;
 const hasEverConnected = ref(false);
 const hasTriedConnect = ref(false);
 
@@ -45,6 +45,10 @@ watch(status, (state) => {
 });
 
 function connect() {
+  if (!navigator.bluetooth) {
+    alert('浏览器不支持 Web Bluetooth，或页面不在 HTTPS 下打开。');
+    return;
+  }
   hasTriedConnect.value = true;
   connectBle();
 }
@@ -70,23 +74,39 @@ function clearInput() {
   focusInput();
 }
 
+function onCompositionStart() {
+  composing = true;
+}
+
 function onCompositionEnd(event) {
-  composing.value = false;
+  composing = false;
   if (!instantMode.value) return;
   if (event.data) send({ t: 'text', v: event.data });
-  text.value = '';
+  clearTextarea(event);
   focusInput();
 }
 
 function onInput(event) {
-  if (!instantMode.value || composing.value) return;
+  if (!instantMode.value) {
+    text.value = event.target.value;
+    return;
+  }
+  if (composing) {
+    // 组合期间让模型跟随输入框，避免其他响应式更新冲掉输入法候选文本。
+    text.value = event.target.value;
+    return;
+  }
   if (event.inputType === 'insertText') {
     if (event.data) send({ t: 'text', v: event.data });
-    text.value = '';
   } else if (event.inputType === 'deleteContentBackward') {
     send({ t: 'key', v: 'backspace' });
-    text.value = '';
   }
+  clearTextarea(event);
+}
+
+function clearTextarea(event) {
+  event.target.value = '';
+  text.value = '';
 }
 
 function onPaste(event) {
@@ -94,11 +114,12 @@ function onPaste(event) {
   event.preventDefault();
   const pasted = event.clipboardData.getData('text');
   if (pasted) send({ t: 'text', v: pasted });
-  text.value = '';
+  clearTextarea(event);
   focusInput();
 }
 
 function onKeydown(event) {
+  if (composing) return;
   if (!instantMode.value) {
     if (event.ctrlKey && event.key === 'Enter') {
       event.preventDefault();
@@ -109,7 +130,7 @@ function onKeydown(event) {
   if (event.key === 'Enter') {
     event.preventDefault();
     send({ t: 'key', v: 'enter' });
-    text.value = '';
+    clearTextarea(event);
     focusInput();
   } else if (event.key === 'Backspace' && text.value === '') {
     event.preventDefault();
@@ -140,13 +161,16 @@ async function pushClipboard() {
   send({ t: 'clip', v: content });
 }
 
-function applyPulledClipboard(content) {
+async function applyPulledClipboard(content) {
   text.value = content;
   focusInput();
   // 浏览器权限限制下写入可能失败；内容已经显示在输入框里，不影响使用。
-  navigator.clipboard.writeText(content).catch((err) => {
+  try {
+    await navigator.clipboard.writeText(content);
+    console.info('已写入手机剪贴板');
+  } catch (err) {
     console.warn('写入手机剪贴板失败', err);
-  });
+  }
 }
 
 // 同一个页面开多个标签页时，每个标签页都是一路独立的 Web Bluetooth 客户端，
@@ -191,10 +215,10 @@ onUnmounted(() => tabChannel.close());
 
     <textarea
       ref="inputEl"
-      v-model="text"
+      :value="text"
       :style="{ height: instantMode ? '80px' : '120px' }"
       :placeholder="placeholder"
-      @compositionstart="composing = true"
+      @compositionstart="onCompositionStart"
       @compositionend="onCompositionEnd"
       @input="onInput"
       @paste="onPaste"

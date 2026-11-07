@@ -38,10 +38,6 @@ export class BleClient {
   }
 
   async requestDevice() {
-    if (!navigator.bluetooth) {
-      alert('浏览器不支持 Web Bluetooth，或页面不在 HTTPS 下打开。');
-      return;
-    }
     this.#stopReconnect();
     this.#onState('connecting');
     try {
