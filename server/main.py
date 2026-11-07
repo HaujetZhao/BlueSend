@@ -13,6 +13,7 @@ from core.server import serve
 from core.single_instance import acquire as acquire_instance_lock
 from core.single_instance import release as release_instance_lock
 from core.tray import enable_dpi_awareness
+from core.version import app_version
 
 logger = logging.getLogger("ble")
 
@@ -20,9 +21,12 @@ INSTANCE_LOCK_NAME = "BlueSend.GattServer"
 
 
 def print_banner() -> None:
+    version = app_version()
+    logger.info("BlueSend 电脑端 v%s", version)
+
     console = Console()
     console.print()
-    console.rule("[bold #4f7cff]BlueSend 电脑端[/]")
+    console.rule(f"[bold #4f7cff]BlueSend 电脑端 v{version}[/]")
     console.print()
     console.print(
         "手机浏览器打开：[cyan underline]https://haujetzhao.github.io/BlueSend/[/]"

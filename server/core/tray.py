@@ -20,6 +20,7 @@ from pystray import MenuItem
 
 from .clipboard import set_clipboard_text
 from .paths import APP_DIR, FROZEN
+from .version import app_version
 
 logger = logging.getLogger("ble")
 
@@ -90,7 +91,7 @@ class Tray:
         self._icon = pystray.Icon(
             "BlueSend",
             _load_icon(),
-            title="BlueSend",
+            title=f"BlueSend {app_version()}",
             menu=(
                 MenuItem("显示/隐藏窗口", self._toggle_window, default=True),
                 MenuItem("复制上传地址", self._copy_upload_url),

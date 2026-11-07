@@ -55,6 +55,7 @@ E:\repos\BlueSend\
 │   │   ├── server.py           GATT Server 主程序
 │   │   ├── logging_setup.py    日志配置（控制台 rich 上色，文件精确到毫秒）
 │   │   ├── single_instance.py  单实例锁（Windows 命名互斥体）
+│   │   ├── version.py          运行期版本号（源码读 pyproject，打包读 exe 资源）
 │   │   ├── protocol.py         UUID 与下行分片上限
 │   │   ├── frame_codec.py      4 字节长度前缀帧编解码
 │   │   ├── clipboard.py        Win32 剪贴板读写
