@@ -21,7 +21,8 @@ body {
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
   background: radial-gradient(circle at 50% 50%, #1a183a 0%, var(--bg-color) 100%);
   color: var(--text-color);
-  min-height: 100vh;
+  /* dvh 跟随手机地址栏收缩，地址栏显示时不会多出一条可滚动的空白 */
+  min-height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: flex-start; /* 靠顶端放置，避开手机键盘 */
