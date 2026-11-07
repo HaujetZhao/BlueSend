@@ -22,6 +22,10 @@ function writeWithTimeout(write) {
   return Promise.race([write, timeout]).finally(() => clearTimeout(timer));
 }
 
+// 重连可能无限进行（见坑 11），积压不设上限会一直吃内存；溢出时丢最旧的，
+// 保住用户最近打的字。这些消息还没交给写链，不属于坑 12 禁止的应用层重传。
+const OUTBOX_LIMIT = 100;
+
 export class BleClient {
   #onState;
   #onEvent;
@@ -40,6 +44,10 @@ export class BleClient {
   // 本轮连接是否已经对外宣布；没宣布就断的是后台重连过程中的失败。
   #announced = false;
   #pendingLogs = [];
+  // 重连期间还没能交给写链的消息；本轮重新宣布连接后整批补发。
+  #outbox = [];
+  // 本轮重连是否已经提示过积压溢出，提示一次就够，免得刷掉真正的连接状态。
+  #outboxOverflowNotified = false;
   #connecting = null;
   #generation = 0;
   #disposed = false;
@@ -118,6 +126,7 @@ export class BleClient {
       this.#announced = true;
       this.#emit(text);
       this.#flushPendingLogs();
+      this.#flushOutbox();
       this.#onState('connected');
     } catch (err) {
       if (generation !== this.#generation || this.#disposed) return;
@@ -129,10 +138,35 @@ export class BleClient {
   }
 
   send(message) {
-    const link = this.#link;
-    if (!link) return false;
-    this.#queue(link, message, this.#generation);
+    // 从未选过设备，无处可发，调用方（如拉取剪贴板）需要知道失败。
+    if (!this.#device) return false;
+    // 后台重连中，或探针写还没成功：链路尚不可信，先攒着，等本轮宣布后补发。
+    if (!this.#announced) {
+      this.#outbox.push(message);
+      if (this.#outbox.length > OUTBOX_LIMIT) {
+        const dropped = this.#outbox.shift();
+        console.warn('重连期间积压消息过多，丢弃最早的一条', dropped);
+        if (!this.#outboxOverflowNotified) {
+          this.#outboxOverflowNotified = true;
+          this.#emit('重连期间积压消息过多，最早的一条已丢弃');
+        }
+      }
+      return true;
+    }
+    this.#queue(this.#link, message, this.#generation);
     return true;
+  }
+
+  // 本轮重连已经宣布，按顺序把积压交给写链。若写链随后失败，代际作废会让
+  // 剩余消息自然不再写出，按坑 12 的语义丢弃，不做应用层重试。
+  #flushOutbox() {
+    const link = this.#link;
+    const generation = this.#generation;
+    const messages = this.#outbox.splice(0);
+    this.#outboxOverflowNotified = false;
+    for (const message of messages) {
+      this.#queue(link, message, generation);
+    }
   }
 
   #queue(link, message, generation) {
@@ -165,6 +199,10 @@ export class BleClient {
     this.#device = null;
     this.#link = null;
     this.#announced = false;
+    // 换了设备（或销毁）时，旧设备积压的消息不该发给新设备。
+    // dispose() 走的就是这里，不必再清一遍。
+    this.#outbox.length = 0;
+    this.#outboxOverflowNotified = false;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
@@ -230,6 +268,9 @@ export class BleClient {
         break;
       case 'clip':
         this.#onClipboard(message.v);
+        break;
+      case 'notice':
+        this.#emit(message.v);
         break;
       default:
         console.warn('未知消息', message);

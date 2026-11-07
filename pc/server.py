@@ -165,7 +165,8 @@ async def main() -> None:
     async def handle(message: dict) -> None:
         kind = message.get("t")
         if kind == "text":
-            keyboard.write(message.get("v", ""))
+            # keyboard.write 是同步阻塞调用，长文本会占住事件循环、憋住心跳。
+            await asyncio.to_thread(keyboard.write, message.get("v", ""))
         elif kind == "key":
             keyboard.send(message.get("v", ""))
         elif kind == "clip":
@@ -175,8 +176,13 @@ async def main() -> None:
                 logger.warning("写入系统剪贴板失败")
         elif kind == "pull":
             text = get_clipboard_text()
-            logger.info("拉取系统剪贴板 %d 字", len(text))
-            await notify({"t": "clip", "v": text})
+            if text is None:
+                # 读失败不等于剪贴板为空：发 clip 会清掉手机端已有的内容。
+                logger.warning("读取系统剪贴板失败")
+                await notify({"t": "notice", "v": "读取电脑剪贴板失败，请稍后重试"})
+            else:
+                logger.info("拉取系统剪贴板 %d 字", len(text))
+                await notify({"t": "clip", "v": text})
         elif kind == "ping":
             await notify({"t": "pong"})
         elif kind == "log":

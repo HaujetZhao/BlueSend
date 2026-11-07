@@ -102,6 +102,8 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 - 电脑 → 手机：分片取 `min(GattSubscribedClient.max_notification_size, 512)`。
 - 心跳：电脑每 3 秒发 `{"t":"hb"}`；网页 9 秒没收到任何消息就判定链路已死。
 - 网页对每次带响应写加 2 秒上限（`WRITE_ACK_TIMEOUT_MS`）；超时即认定链路不可用，主动断开重连，不补发（见坑 12）。
+- 重连期间网页把消息压进有界待发队列（100 条），宣布连接后按顺序补发；溢出丢最旧的一条。这只针对还没交给写链的消息，和「不做应用层重传」不冲突。
+- 电脑读不到剪贴板（被占用）时发 `notice` 而不是空 `clip`，避免清空手机端剪贴板。
 - 改协议时 `protocol.md`、`pc/server.py`、`pc/protocol.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
 ## 六、已知约束与踩过的坑
