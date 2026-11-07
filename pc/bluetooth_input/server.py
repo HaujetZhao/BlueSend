@@ -149,13 +149,23 @@ async def serve() -> None:
         # 重组器同样按连接清零（自带锁，直接调即可）。
         assembler.reset()
         loop.call_soon_threadsafe(decoder.reset)
+        # 订阅清零，会话对象随之作废；下一轮订阅是全新对象，必须重新挂监听。
+        if not clients:
+            watched.clear()
         for client in clients:
-            key = str(client.session.device_id)
-            if key in watched:
-                continue
-            watched.add(key)
-            client.add_max_notification_size_changed(on_max_notification_size_changed)
-            client.session.add_session_status_changed(on_session_status_changed)
+            # 去重键取 .id（字符串）。不能用 str(device_id)：pywinrt 没给
+            # BluetoothDeviceId 定义 __str__，拿到的是包装对象的内存地址，
+            # 同一台设备两次取值的结果并不相等。
+            key = client.session.device_id.id
+            if key not in watched:
+                watched.add(key)
+                client.add_max_notification_size_changed(
+                    on_max_notification_size_changed
+                )
+                client.session.add_session_status_changed(on_session_status_changed)
+            # 上行上限是连接作用域的：网页端每条连接都把它复位成 ATT 最小值，
+            # 所以每次订阅变化都要重新下发，不能按设备去重——漏一次，手机端
+            # 就整条连接按 20 字节切。
             on_max_notification_size_changed(client, None)
 
     downlink.add_subscribed_clients_changed(on_subscribed_changed)
