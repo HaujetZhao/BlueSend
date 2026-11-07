@@ -127,6 +127,13 @@ async def serve() -> None:
         nonlocal notification_size
         notification_size = downlink_chunk_size(client.max_notification_size)
         logger.info("通知分片上限：%d 字节", notification_size)
+        # 上行的写 PDU 与下行的通知 PDU 都是「操作码 1＋句柄 2＋值」，单片上限
+        # 同为 MTU-3，所以这个数直接就是手机的上行线包上限。MTU 是外部事实，
+        # 不能两边各写死 512：换台只协商出 247 甚至 23 的适配器，写满 512 会硬失败。
+        size = notification_size
+        loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(notify({"t": "mtu", "up": size}))
+        )
 
     watched: set[str] = set()
 

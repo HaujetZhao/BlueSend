@@ -3,7 +3,7 @@ import {
   UPLINK_UUID,
   DOWNLINK_UUID,
   HEARTBEAT_TIMEOUT_MS,
-  WRITE_CHUNK,
+  UPLINK_LIMIT_MIN,
   RECONNECT_INTERVAL_MS,
   WRITE_ACK_TIMEOUT_MS,
 } from './protocol.js';
@@ -25,12 +25,6 @@ function writeWithTimeout(write, timeoutMs = WRITE_ACK_TIMEOUT_MS) {
 // 空中排空实测约 8 毫秒一片（512 B ≈ 63 KB/s）。最后一片的应答要等前面的
 // 片在空中排空，超时按片数放宽，余量 3 倍。
 const DRAIN_MS_PER_CHUNK = 25;
-
-// 上行单包大小。无响应写的协商上限 maxWriteWithoutResponseSize 要 Chrome 157
-// 才有，当前版本原型上没有，永远走实测的 512（见 protocol.js 的注释）。
-function chunkSizeOf(uplink) {
-  return uplink.maxWriteWithoutResponseSize || WRITE_CHUNK;
-}
 
 // 重连可能无限进行（见坑 11），积压不设上限会一直吃内存；溢出时丢最旧的，
 // 保住用户最近打的字。这些消息还没交给写链，不属于坑 12 禁止的应用层重传。
@@ -64,6 +58,9 @@ export class BleClient {
   // 上行分片序号：连接作用域的连续计数。不能每条消息从 0 数——电脑端重组器
   // 跨消息只进不退，重新从 0 计数会被当成重复片全部丢弃。
   #uplinkSeq = 0;
+  // 上行单片线包上限：电脑端按协商出的 MTU 下发（mtu 消息），同样是连接作用域。
+  // 收到之前用 ATT 最小 MTU 推出来的 20，任何链路上都写得出去。
+  #uplinkLimit = UPLINK_LIMIT_MIN;
   #generation = 0;
   #disposed = false;
   // 刚收到的下行测速载荷，留着给随后的 benchend 做内容校验。
@@ -84,7 +81,7 @@ export class BleClient {
 
   // 上行实际使用的单包大小，测速时随结果一起上报。
   get uplinkChunkSize() {
-    return chunkSizeOf(this.#link.uplink);
+    return this.#uplinkLimit;
   }
 
   async requestDevice() {
@@ -139,6 +136,7 @@ export class BleClient {
       this.#decoder.reset();
       this.#writeChain = Promise.resolve();
       this.#uplinkSeq = 0;
+      this.#uplinkLimit = UPLINK_LIMIT_MIN;
       this.#noteAlive();
       this.#stopReconnect();
       this.#connectedAt = Date.now();
@@ -243,6 +241,7 @@ export class BleClient {
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     this.#uplinkSeq = 0;
+    this.#uplinkLimit = UPLINK_LIMIT_MIN;
     device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
     device?.gatt?.disconnect();
   }
@@ -269,8 +268,8 @@ export class BleClient {
 
   async #writeFrame(uplink, frame, generation, onProgress) {
     // 每片 4 字节大端序号前缀：电脑端写回调跑在线程池上，并发投递的字节顺序
-    // 会颠倒（实测 517 片三轮坏一次），接收端按序号重排。体 508＋头 4＝线包 512。
-    const size = chunkSizeOf(uplink) - 4;
+    // 会颠倒（实测 517 片三轮坏一次），接收端按序号重排。载荷 = 线包上限 - 4。
+    const size = this.#uplinkLimit - 4;
     const chunks = Math.ceil(frame.length / size);
     // 序号取连接作用域的连续计数，跨消息不归零（见字段注释）。
     const seqBase = this.#uplinkSeq;
@@ -332,6 +331,10 @@ export class BleClient {
       case 'hb':
       case 'pong':
         break;
+      case 'mtu':
+        // 电脑端按协商出的 MTU 算的单片上限，连接边界会复位成 ATT 最小值。
+        this.#uplinkLimit = message.up;
+        break;
       case 'benchdata':
         // 载荷没有业务含义，但要留着：benchend 到达时拿它重算哈希，验分片顺序。
         this.#benchPayload = message.v;
@@ -376,6 +379,7 @@ export class BleClient {
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
     this.#uplinkSeq = 0;
+    this.#uplinkLimit = UPLINK_LIMIT_MIN;
     // 写失败或心跳超时不代表链路已经断了。主动断开，电脑端才能看到会话结束、
     // 清掉它那边的半帧缓冲；否则重连会继续用一条已经失步的流。
     if (this.#device?.gatt?.connected) this.#device.gatt.disconnect();
