@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from bluetooth_input.frame_codec import (
+from core.frame_codec import (
     MAX_FRAME_BYTES,
     Decoder,
     FrameError,

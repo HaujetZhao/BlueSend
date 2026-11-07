@@ -5,13 +5,13 @@ import logging
 import sys
 from pathlib import Path
 
-from bluetooth_input.logging_setup import setup_logging
-from bluetooth_input.server import serve
-from bluetooth_input.single_instance import acquire as acquire_instance_lock
+from core.logging_setup import setup_logging
+from core.server import serve
+from core.single_instance import acquire as acquire_instance_lock
 
 logger = logging.getLogger("ble")
 
-INSTANCE_LOCK_NAME = "BluetoothInput.GattServer"
+INSTANCE_LOCK_NAME = "BlueSend.GattServer"
 
 
 def main() -> None:

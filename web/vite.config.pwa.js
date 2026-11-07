@@ -16,9 +16,9 @@ export default defineConfig({
       injectRegister: false,
       manifest: {
         lang: 'zh-CN',
-        name: '手机 ↔ 电脑 蓝牙通道',
-        short_name: '蓝牙输入',
-        description: '通过 BLE 用手机给电脑打字、同步剪贴板。',
+        name: 'BlueSend · 手机 ↔ 电脑',
+        short_name: 'BlueSend',
+        description: '通过 BLE 用手机给电脑打字、同步剪贴板、传文件。',
         theme_color: '#0f0f13',
         background_color: '#0f0f13',
         display: 'standalone',

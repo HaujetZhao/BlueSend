@@ -1,6 +1,6 @@
-# Bluetooth Input
+# BlueSend
 
-通过低功耗蓝牙 (BLE)，用手机给电脑打字。
+通过低功耗蓝牙（BLE），把手机变成电脑的无线输入、剪贴板与文件通道。
 
 **无需安装任何手机 App** — 手机浏览器打开网页即可连接，电脑端运行一个小服务即可。
 
@@ -30,7 +30,7 @@ npm install
 需要 Python 3.12+，依赖用 [uv](https://docs.astral.sh/uv/) 管理：
 
 ```powershell
-cd pc
+cd server
 uv run python main.py
 ```
 
@@ -38,7 +38,7 @@ uv run python main.py
 
 ### 3. 手机端连接
 
-**在线版**：手机浏览器打开 **https://haujetzhao.github.io/Bluetooth-Input/** ，点左上角的连接状态药丸选中你的电脑即可。
+**在线版**：手机浏览器打开 **https://haujetzhao.github.io/BlueSend/** ，点左上角的连接状态药丸选中你的电脑即可。
 
 **本地开发**：在 `web` 目录运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书。dev server 走的是 `web/certs/` 下的自签证书。
 
@@ -67,7 +67,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 │   ├── public/             PWA 图标
 │   ├── certs/              自签证书，dev server 用
 │   └── vite.config*.js     开发 / 单文件 / PWA 三套构建
-├── pc/                     电脑端，WinRT GATT Server
+├── server/                 电脑端，WinRT GATT Server
 ├── .github/workflows/      GitHub Actions：构建 PWA 并发布到 Pages
 ├── protocol.md             协议：UUID、帧格式、消息类型
 ├── AGENTS.md               项目说明与开发约定
@@ -85,7 +85,7 @@ npm run build      # 单文件产物 dist/index.html，交给任意 HTTPS 托管
 npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
-改协议时，`protocol.md`、`pc/bluetooth_input/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
+改协议时，`protocol.md`、`server/core/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
 ## 发布
 

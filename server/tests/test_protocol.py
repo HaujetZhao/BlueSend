@@ -1,4 +1,4 @@
-from bluetooth_input.protocol import (
+from core.protocol import (
     BENCH_BYTES,
     DOWNLINK_CHUNK_LIMIT,
     bench_payload,

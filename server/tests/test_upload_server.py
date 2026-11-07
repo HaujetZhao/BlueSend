@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import pytest
 
-from bluetooth_input.upload_server import (
+from core.upload_server import (
     UploadService,
     reserve_path,
     sanitize_filename,

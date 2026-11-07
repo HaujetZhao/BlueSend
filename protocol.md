@@ -78,7 +78,7 @@
 | `GET /ping?t=<token>` | 探测用，回 204 空响应；token 不匹配回 403 |
 | `POST /upload?t=<token>` | 请求头 `X-Filename` 为 `encodeURIComponent` 后的文件名、`X-Target` 为 `desktop` 或 `downloads`，body 为文件原始字节；必须带 `Content-Length`，否则回 411 |
 
-服务端按 `Content-Length` 流式写盘，按 `X-Target` 落到两个预置目标之一：`desktop` 是系统桌面文件夹、`downloads` 是系统「下载」文件夹，各自再进一层子文件夹，子文件夹名由 `pc/bluetooth_input/config.toml` 的 `[upload] folder` 决定（示例 `手机传输`）。`X-Target` 缺失或不是这两个值回 400，不进入任何磁盘逻辑；目标子文件夹不存在时在请求时自动创建。同名文件追加 ` (1)`。端口首选 8377，被占用时改用临时端口，实际端口只在 `net` 里体现。token 每次启动随机生成，电脑端重启后旧 URL 失效。
+服务端按 `Content-Length` 流式写盘，按 `X-Target` 落到两个预置目标之一：`desktop` 是系统桌面文件夹、`downloads` 是系统「下载」文件夹，各自再进一层子文件夹，子文件夹名由 `server/core/config.toml` 的 `[upload] folder` 决定（示例 `手机传输`）。`X-Target` 缺失或不是这两个值回 400，不进入任何磁盘逻辑；目标子文件夹不存在时在请求时自动创建。同名文件追加 ` (1)`。端口首选 8377，被占用时改用临时端口，实际端口只在 `net` 里体现。token 每次启动随机生成，电脑端重启后旧 URL 失效。
 
 上传结果不回流到蓝牙：上传页自己显示进度，主页面不感知。
 

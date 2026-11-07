@@ -1,4 +1,4 @@
-// 帧格式：[4 字节大端长度][UTF-8 JSON]，与 pc/frame_codec.py 对齐。
+// 帧格式：[4 字节大端长度][UTF-8 JSON]，与 server/core/frame_codec.py 对齐。
 export function encodeFrame(message) {
   const body = new TextEncoder().encode(JSON.stringify(message));
   const frame = new Uint8Array(4 + body.length);

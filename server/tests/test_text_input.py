@@ -1,4 +1,4 @@
-from bluetooth_input import text_input
+from core import text_input
 
 WM_CHAR = 0x0102
 

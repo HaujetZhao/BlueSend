@@ -1,10 +1,10 @@
-# AGENTS.md：手机 ↔ 电脑 BLE 通道
+# AGENTS.md：BlueSend（手机 ↔ 电脑 BLE 通道）
 
 面向在本仓库工作的 AI 代理与开发者。产品说明见 [readme.md](readme.md)，协议的唯一事实来源是 [protocol.md](protocol.md)。
 
 ## 一、项目是什么
 
-自用工具：**手机与电脑之间畅快传信息**（打字直接上屏、剪贴板互推）。
+自用工具：**手机与电脑之间畅快传信息**（打字直接上屏、剪贴板互推、局域网传文件）。
 
 技术路线：**电脑做 BLE 外设，手机开网页连上去**。选 BLE 而不是 RFCOMM，唯一的理由是手机端能用网页——不用装 App、不用过应用商店；代价是 Windows 侧只能自己用 WinRT 写 GATT Server（没有成熟的高层库）。
 
@@ -16,7 +16,7 @@
 |---|---|---|
 | GATT Server（外设，广播） | Windows 电脑 | Python 3.14 + `winrt-Windows.Devices.Bluetooth.GenericAttributeProfile` |
 | GATT Client（中心，主动连接） | 手机 | 网页 + Web Bluetooth（Android Chrome） |
-| 网页承载 | GitHub Pages（`haujetzhao.github.io/Bluetooth-Input/`），或本地 Vite dev server | 静态 HTTPS 页面（Web Bluetooth 要求安全上下文） |
+| 网页承载 | GitHub Pages（`haujetzhao.github.io/BlueSend/`），或本地 Vite dev server | 静态 HTTPS 页面（Web Bluetooth 要求安全上下文） |
 
 **不能用 bleak。** bleak 只支持 Windows 做中心，本项目角色反过来，必须直接用 WinRT 的 `GattServiceProvider`。
 
@@ -28,7 +28,7 @@
 ## 三、代码地图
 
 ```text
-E:\repos\Bluetooth-Input\
+E:\repos\BlueSend\
 ├── AGENTS.md                   本文件：给代理与开发者的项目说明
 ├── readme.md                   对外说明
 ├── protocol.md                 协议的唯一事实来源
@@ -44,9 +44,9 @@ E:\repos\Bluetooth-Input\
 │   ├── public\                 PWA 图标
 │   ├── certs\{cert,key}.pem    自签证书，dev server 用
 │   └── vite.config{,.pwa}.js   三套构建配置
-├── pc\                         电脑端
+├── server\                     电脑端
 │   ├── main.py                 入口：日志、单实例锁、启动
-│   ├── bluetooth_input\        电脑端包
+│   ├── core\                   电脑端包
 │   │   ├── server.py           GATT Server 主程序
 │   │   ├── logging_setup.py    日志配置（控制台 rich 上色，文件精确到毫秒）
 │   │   ├── single_instance.py  单实例锁（Windows 命名互斥体）
@@ -75,17 +75,17 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object Proc
 再启动电脑端：
 
 ```powershell
-cd E:\repos\Bluetooth-Input\pc
+cd E:\repos\BlueSend\server
 uv run python main.py
 ```
 
 看到 `广播状态：2`（Started）就是在等手机连接。同时会打印 `文件上传入口：http://<局域网IP>:<端口>/?t=…`（没有可用局域网地址时打印「没有可用的局域网地址」）。手机与电脑必须在同一局域网，且首次运行时 Windows 防火墙会弹窗询问是否允许 python 访问网络——拒绝的话上传页打不开，蓝牙不受影响。
 
-日志同时写 `pc/logs/ble-<时间戳>.log`，网页端的连接探针（`已连接（第 N 次）`）也会通过 `log` 消息打进来；断开诊断（`第 N 次断开：…，上次连接存活 N 秒`）只送电脑端看不到的那几种原因——心跳超时、写入失败、接收解析失败，物理断开电脑端自己看得到（订阅清零＋链路状态已断开）。页面上的业务日志则只留在手机上。每次启动建一个日志文件，启动时只保留最近 30 个，更旧的自动清理。
+日志同时写 `server/logs/ble-<时间戳>.log`，网页端的连接探针（`已连接（第 N 次）`）也会通过 `log` 消息打进来；断开诊断（`第 N 次断开：…，上次连接存活 N 秒`）只送电脑端看不到的那几种原因——心跳超时、写入失败、接收解析失败，物理断开电脑端自己看得到（订阅清零＋链路状态已断开）。页面上的业务日志则只留在手机上。每次启动建一个日志文件，启动时只保留最近 30 个，更旧的自动清理。
 
 手机端两种访问方式：
 
-- **在线版**：`https://haujetzhao.github.io/Bluetooth-Input/`（由 `.github/workflows/deploy.yml` 在推送 `main` 后构建发布）
+- **在线版**：`https://haujetzhao.github.io/BlueSend/`（由 `.github/workflows/deploy.yml` 在推送 `main` 后构建发布）
 - **本地开发**：在 `web\` 下运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书
 
 连上后点左上角的状态药丸 → 选中电脑。卡片最底下那条状态栏会显示「已连接（第 N 次）」（N 是这条链路第几次连上），同一句话也会作为探针写进电脑端日志；断线时显示「连接已断开，正在自动重连…」，断开原因与存活时长写进手机控制台，其中电脑端看不到的几种还会随重连补发进电脑端日志。剪贴板拉取、推送的结果也报在这一行（带字符数）。
@@ -100,7 +100,7 @@ npm run build      # 单文件产物 dist/index.html
 npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
-电脑端单测：`cd pc && uv run pytest`。
+电脑端单测：`cd server && uv run pytest`。
 
 ## 五、协议速查
 
@@ -117,7 +117,7 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 - 重连期间网页把消息压进有界待发队列（100 条），宣布连接后按顺序补发；溢出丢最旧的一条。这只针对还没交给写链的消息，和「不做应用层重传」不冲突。
 - 电脑读不到剪贴板（被占用）时发 `notice` 而不是空 `clip`，避免清空手机端剪贴板。
 - 下行测速载荷每次随机（base64），`benchend` 带 `sha256`，手机重算比对。固定载荷换两片照样是合法 JSON、长度也对，速率看不出问题，只有内容哈希能证明「收到的就是发出的」。
-- 改协议时 `protocol.md`、`pc/bluetooth_input/server.py`、`pc/bluetooth_input/protocol.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
+- 改协议时 `protocol.md`、`server/core/server.py`、`server/core/protocol.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
 ## 六、已知约束与踩过的坑
 
@@ -168,7 +168,7 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 `uv run` 外面包了一层，停后台任务只杀到包装进程，真正的 python 子进程还活着。两个进程用同一个 Service UUID 各自注册、各自广播，症状是 `GATT Error Unknown`、刚连就断。
 
-BLE 接口本身给不出「这个 Service UUID 已被占用」的信号：实测两个进程各自 `create_async` 都返回 `error: 0`，广播状态也各说各话，唯一的痕迹是互相把对方的广播挤成 3（Aborted）再恢复 2。`BluetoothLEAdvertisementWatcher` 也不行——本机适配器收不到自己发出的广播（监听 6 秒收到 44 个包，来自本机地址的 0 个，而当时广播状态是 Started），WinRT 也没有枚举本机 GATT 注册的接口。所以走进程层——启动时先抢命名互斥体 `BluetoothInput.GattServer`，抢不到就打印提示并退出，不碰 BLE（`pc/bluetooth_input/single_instance.py`）。互斥体随进程退出由系统释放，不会留僵尸锁。
+BLE 接口本身给不出「这个 Service UUID 已被占用」的信号：实测两个进程各自 `create_async` 都返回 `error: 0`，广播状态也各说各话，唯一的痕迹是互相把对方的广播挤成 3（Aborted）再恢复 2。`BluetoothLEAdvertisementWatcher` 也不行——本机适配器收不到自己发出的广播（监听 6 秒收到 44 个包，来自本机地址的 0 个，而当时广播状态是 Started），WinRT 也没有枚举本机 GATT 注册的接口。所以走进程层——启动时先抢命名互斥体 `BlueSend.GattServer`，抢不到就打印提示并退出，不碰 BLE（`server/core/single_instance.py`）。互斥体随进程退出由系统释放，不会留僵尸锁。
 
 它只识别同样带这把锁的实例；`E:\repos\ble` 里的旧副本和其他程序不受约束，那种情况仍要按第四节的命令人工查。
 
@@ -184,7 +184,7 @@ Windows 报给 `GattSubscribedClient.max_notification_size` 的是 MTU-3，实�
 
 症状：长剪贴板消息的整分片全被丢掉，只有末尾那个小于 512 字节的短分片能到手机，长度前缀解码器永远拼不完整；后续心跳也被吞，9 秒看门狗判死重连。短消息（小于 512 字节）不受影响。
 
-修法：下行分片夹到 512，即 `min(GattSubscribedClient.max_notification_size, 512)`，代码在 `pc/bluetooth_input/protocol.py` 的 `downlink_chunk_size`。
+修法：下行分片夹到 512，即 `min(GattSubscribedClient.max_notification_size, 512)`，代码在 `server/core/protocol.py` 的 `downlink_chunk_size`。
 
 ### 11. 电脑端重启后网页自动重连无法真正恢复
 
@@ -211,7 +211,7 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 
 `text` 消息默认用 `keyboard.write`（SendInput + `KEYEVENTF_UNICODE`）。焦点应用挂着中文输入法时，全角中文标点后的 `KEYUP` 会被输入法吞掉，Qt5 应用（微信、Telegram）按错乱的输入法状态提交，表现为标点后第一个字被替换成同一个标点。原生控件（记事本）、CMD、PowerShell、Windows Terminal 不受影响。
 
-修法：`pc/bluetooth_input/config.toml` 的 `wm_char_apps` 列出进程名（`Weixin.exe`、`Telegram.exe`），命中的改投 `WM_CHAR`（`pc/bluetooth_input/text_input.py`）。不能全局替换——Windows Terminal 收不到 `WM_CHAR`。完整复现与证据见 [docs/ime-typing-bug.md](docs/ime-typing-bug.md)。
+修法：`server/core/config.toml` 的 `wm_char_apps` 列出进程名（`Weixin.exe`、`Telegram.exe`），命中的改投 `WM_CHAR`（`server/core/text_input.py`）。不能全局替换——Windows Terminal 收不到 `WM_CHAR`。完整复现与证据见 [docs/ime-typing-bug.md](docs/ime-typing-bug.md)。
 
 ### 14. 上行比下行慢一个数量级：带响应写是停等协议
 
@@ -265,7 +265,7 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 
 ## 八、调试手法
 
-**看服务端日志**：`pc/logs/ble-<时间戳>.log`。健康状态下应该只有零星三行：
+**看服务端日志**：`server/logs/ble-<时间戳>.log`。健康状态下应该只有零星三行：
 
 ```text
 订阅变化：当前 1 个订阅客户端
@@ -293,7 +293,7 @@ curl -s http://127.0.0.1:9222/json            # 列出标签页，拿 webSocketD
 | 项 | 值 |
 |---|---|
 | 手机 | vivo V2352A，Android 16（SDK 36），配对的电脑是 `DESKTOP-2QELB5P` |
-| Python | 3.14.7，uv 管理，`pc/.venv` |
+| Python | 3.14.7，uv 管理，`server/.venv` |
 | 电脑蓝牙 | Intel Wi-Fi 7 BE200，外设角色可用 |
 | 浏览器 | Android Chrome（支持 `writeValueWithResponse`；`maxWriteWithoutResponseSize` 要到 Chrome 157） |
 | adb | SDK 里的 37.0.0：`"$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"`，Git Bash 下加 `MSYS_NO_PATHCONV=1` 前缀 |
