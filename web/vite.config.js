@@ -16,6 +16,14 @@ const https = {
 export default defineConfig({
   plugins: [vue(), viteSingleFile()],
   base: './',
+  resolve: {
+    alias: {
+      // dev 与单文件构建没有 service worker，指向桩，避免解析 PWA 虚拟模块。
+      '@pwa-update': fileURLToPath(
+        new URL('./src/logic/pwa-update.stub.js', import.meta.url),
+      ),
+    },
+  },
   server: {
     host: true,
     https,

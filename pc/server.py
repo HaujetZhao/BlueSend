@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import keyboard
+from winrt.windows.devices.bluetooth import BluetoothError
 from winrt.windows.devices.bluetooth.genericattributeprofile import (
     GattCharacteristicProperties,
     GattCommunicationStatus,
@@ -40,7 +41,11 @@ def to_buffer(data: bytes):
 async def main() -> None:
     decoder = Decoder()
 
-    provider = (await GattServiceProvider.create_async(SERVICE_UUID)).service_provider
+    service_result = await GattServiceProvider.create_async(SERVICE_UUID)
+    if service_result.error != BluetoothError.SUCCESS:
+        logger.error("创建 GATT 服务失败：%s（蓝牙是否已开启？）", service_result.error)
+        raise SystemExit(1)
+    provider = service_result.service_provider
     logger.info("服务已创建 %s", SERVICE_UUID)
 
     # 上行只声明 WRITE：无响应写没有顺序保证，会让长文本的分片颠倒。
@@ -48,16 +53,24 @@ async def main() -> None:
     uplink_params = GattLocalCharacteristicParameters()
     uplink_params.characteristic_properties = GattCharacteristicProperties.WRITE
     uplink_params.write_protection_level = GattProtectionLevel.PLAIN
-    uplink = (
-        await provider.service.create_characteristic_async(UPLINK_UUID, uplink_params)
-    ).characteristic
+    uplink_result = await provider.service.create_characteristic_async(
+        UPLINK_UUID, uplink_params
+    )
+    if uplink_result.error != BluetoothError.SUCCESS:
+        logger.error("创建上行特征值失败：%s（蓝牙是否已开启？）", uplink_result.error)
+        raise SystemExit(1)
+    uplink = uplink_result.characteristic
     logger.info("上行特征值已创建 %s（手机写入）", UPLINK_UUID)
 
     downlink_params = GattLocalCharacteristicParameters()
     downlink_params.characteristic_properties = GattCharacteristicProperties.NOTIFY
-    downlink = (
-        await provider.service.create_characteristic_async(DOWNLINK_UUID, downlink_params)
-    ).characteristic
+    downlink_result = await provider.service.create_characteristic_async(
+        DOWNLINK_UUID, downlink_params
+    )
+    if downlink_result.error != BluetoothError.SUCCESS:
+        logger.error("创建下行特征值失败：%s（蓝牙是否已开启？）", downlink_result.error)
+        raise SystemExit(1)
+    downlink = downlink_result.characteristic
     logger.info("下行特征值已创建 %s（电脑通知）", DOWNLINK_UUID)
 
     loop = asyncio.get_running_loop()

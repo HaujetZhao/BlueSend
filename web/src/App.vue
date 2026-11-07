@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useBle } from './composables/useBle.js';
+import { needRefresh, updateServiceWorker } from '@pwa-update';
 
 const instantMode = ref(true);
 const text = ref('');
@@ -215,7 +216,16 @@ onUnmounted(() => tabChannel.close());
       </div>
     </div>
 
-    <div class="event-log">{{ lastEvent }}</div>
+    <div class="event-log">
+      {{ lastEvent }}
+      <button
+        v-if="needRefresh"
+        class="update-hint"
+        @click="updateServiceWorker(true)"
+      >
+        有新版本，点击刷新
+      </button>
+    </div>
 
     <textarea
       ref="inputEl"

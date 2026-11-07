@@ -78,7 +78,10 @@ export class BleClient {
     } catch (err) {
       console.warn('选择设备失败', err);
       // 取消选择时旧链路还活着，恢复到已连接状态。
-      this.#onState(this.#link ? 'connected' : 'disconnected');
+      this.#onState(this.#announced ? 'connected' : 'disconnected');
+      // 入口处的 #stopReconnect() 让旧设备的后台重连停了；选择器取消或
+      // 连接失败后没有新链路接手，这里必须重新调度，否则再也连不回来。
+      if (this.#device && !this.#link) this.#scheduleReconnect();
     }
   }
 
@@ -244,7 +247,9 @@ export class BleClient {
   #onDeviceDisconnect = () => this.#handleDrop('物理断开');
 
   #onNotify = (event) => {
-    if (!this.#link) return;
+    // 断线前排队的回调可能在重连成功后才执行。只认当前链路的特征值，
+    // 否则旧链路的字节会被灌进新链路的解码器，把帧边界带偏。
+    if (event.target !== this.#link?.downlink) return;
     const view = event.target.value;
     const chunk = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
     try {

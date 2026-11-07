@@ -69,6 +69,18 @@ body {
   word-break: break-all;
 }
 
+/* PWA 新版本提示：与事件行同字号，弱化成一行可点的文字 */
+.update-hint {
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: #818cf8;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* 左侧状态与扫描连接 */
 .left-controls {
   display: flex;

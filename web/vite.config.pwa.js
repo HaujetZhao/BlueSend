@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
+import { fileURLToPath } from 'node:url';
 
 // PWA 构建配置：用于 GitHub Pages 在线版。
 // 与 vite.config.js（单文件构建，给本地 HTTPS 托管）分开，
@@ -11,6 +12,8 @@ export default defineConfig({
     VitePWA({
       // prompt 而非 autoUpdate：新版只在后台预缓存，不强制刷新页面。
       registerType: 'prompt',
+      // 注册交给 useRegisterSW（pwa-update.pwa.js），插件不再自动注入脚本。
+      injectRegister: false,
       manifest: {
         lang: 'zh-CN',
         name: '手机 ↔ 电脑 蓝牙通道',
@@ -31,4 +34,12 @@ export default defineConfig({
     }),
   ],
   base: './',
+  resolve: {
+    alias: {
+      // 只有这份配置带 VitePWA，虚拟模块 virtual:pwa-register/vue 才存在。
+      '@pwa-update': fileURLToPath(
+        new URL('./src/logic/pwa-update.pwa.js', import.meta.url),
+      ),
+    },
+  },
 });
