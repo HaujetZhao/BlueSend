@@ -10,7 +10,7 @@
 
 **仓库现状**：`E:\repos\Bluetooth-Input`，前端已迁到 `refactor/vue` 分支（Vue 3 + Vite），`main` 仍是旧的原生 JS 前端。`origin` 指向 GitHub。
 
-血缘：代码最初在 `E:\repos\ble` 里成形（那里还试过原生 Android App 路线，卡在「30 秒自动断开」），2026-11-07 合并进本仓库。`E:\repos\ble` 现在是冻结的旧副本，没有价值，可以随时丢弃；原生 App 源码在本仓库的 `.trash/android-legacy-2026-11-07/`（`.trash/` 不入库）。
+血缘：代码最初在 `E:\repos\ble` 里成形（那里还试过原生 Android App 路线，卡在「30 秒自动断开」），2026-11-07 合并进本仓库。`E:\repos\ble` 现在是冻结的旧副本，没有价值，可以随时丢弃；原生 App 源码未随本仓库保留（`.trash/` 中没有该目录）。
 
 ## 二、架构
 
@@ -147,7 +147,7 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 ## 七、仓库状态与待办
 
-**已验证通过（2026-11-07 实测）：**
+**已验证通过（旧原生 JS 前端，2026-11-07 实测）：**
 
 - 网页经 HTTPS 打开、扫描到电脑并连上
 - 长中文文本完整上屏，未复现 `UnicodeDecodeError`
@@ -156,11 +156,16 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 - 原「30 秒断开」未复现
 - `cd pc && uv run pytest` → 7 passed
 
-**明天的优先级：**
+**Vue 重写后尚未真机验收：**
 
-1. 决定是否 push 到 GitHub（push 之后 GitHub Pages 才会换成新页面）
-2. 长时间挂机（十几分钟以上、跨锁屏）看是否稳
-3. 重连实测：杀掉电脑端进程，看网页是否 9 秒内察觉并在电脑重启后自动接回
+- 本机已通过：`npm test` 8 项、`npm run build`（单文件）、`npm run build:pwa`、HTTPS dev server 返回 200
+- 待手机实测：连接与长中文文本、IME 组合输入、手势退格/回车、粘贴、剪贴板双向、杀掉电脑端进程后 9 秒判死并自动接回、切后台/锁屏回来后的重连、多标签页提示
+
+**接下来的优先级：**
+
+1. 先决定 GitHub Pages 发布方式：目前是 legacy 分支发布（`main:/`），直接合并推送会白屏；需要接 GitHub Actions 构建 `dist/`，或发布到 `gh-pages` 分支
+2. 手机真机验收上面的 Vue 版本
+3. 长时间挂机（十几分钟以上、跨锁屏）看是否稳
 4. 之后才谈演进：GUI、历史记录、文件传输
 
 **已知取舍：**

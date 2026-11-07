@@ -98,10 +98,14 @@ function onInput(event) {
   }
   if (event.inputType === 'insertText') {
     if (event.data) send({ t: 'text', v: event.data });
+    clearTextarea(event);
   } else if (event.inputType === 'deleteContentBackward') {
     send({ t: 'key', v: 'backspace' });
+    clearTextarea(event);
+  } else {
+    // 其他输入类型（如 Delete、Ctrl+Backspace）保留在输入框里，与旧版一致。
+    text.value = event.target.value;
   }
-  clearTextarea(event);
 }
 
 function clearTextarea(event) {

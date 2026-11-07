@@ -1577,3 +1577,5 @@ Expected：无输出。
 4. **Task 6 输入区**：即时输入不再使用 `v-model` + 模板 `@input` 的组合（依赖 Vue 内部监听器注册顺序），改为 `:value="text"` + 单一 `@input`；`composing` 改为普通变量；组合期间 `keydown` 直接返回；剪贴板写回改为 async try/catch；Web Bluetooth 能力检查与提示上移到 `App.vue`。
 5. **Task 6/7 产物**：单文件构建的 `dist/` 会连同 `public/` 下两张 PWA 图标一起复制，`index.html` 本身 JS/CSS 已全部内联，体积约 80 KB。
 6. **Task 9 验证**：单文件产物约 80 KB，不采用计划里「大于 100 KB」的经验阈值；以构建成功与内联检查为准。
+7. **输入区细节**：即时模式下只对 `insertText` 与 `deleteContentBackward` 清空输入框，其他输入类型保留内容（与旧版一致）；不在连接状态时切换即时开关，占位文案优先显示链路状态（比旧版更合理，属已记录的小偏差）。
+8. **运行环境**：`package.json` 声明 `engines.node >= 22`，因为 `node --test` 的 glob 参数需要 Node 22+。

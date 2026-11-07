@@ -209,7 +209,7 @@ new BleClient({
   - 与 `pc/frame_codec.py` 对齐的固定字节夹具；
   - 长度字段跨多个字节（载荷 300 字节）；
   - 分片边界落在 UTF-8 多字节字符中间。
-- `npm test` 执行 `node --test src/logic/*.test.js`，共 8 个用例。
+- `npm test` 执行 `node --test src/logic/*.test.js`，共 8 个用例；要求 Node 22+。
 - 构建验证：`npm run build`、`npm run build:pwa` 均成功且产物符合预期；单文件构建的 `dist/index.html` 会连同 `public/` 下的两张 PWA 图标一起复制，但 JS/CSS 已全部内联。
 - 开发验证：`npm run dev` 启动 HTTPS 服务，局域网内手机可打开页面。
 - 蓝牙真机验收（连接、长文本、即时输入、剪贴板双向）由用户本人完成。
