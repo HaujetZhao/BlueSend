@@ -26,6 +26,7 @@ const {
 } = useBle({
   onClipboard: applyPulledClipboard,
   onBench: showBenchResult,
+  onReceiveProgress: showReceiveProgress,
 });
 
 const statusLabel = computed(
@@ -189,20 +190,42 @@ async function applyPulledClipboard(content) {
   }
 }
 
+// 一片一片刷会让事件行闪个不停，节流到 100 毫秒一次。
+const PROGRESS_INTERVAL_MS = 100;
+let benchStarted = 0;
+let benchShownAt = 0;
+
+// 速率用「已传字节 ÷ 至今耗时」，是平均值，不逐片抖动。
+function showBenchProgress(received, total) {
+  const now = performance.now();
+  if (now - benchShownAt < PROGRESS_INTERVAL_MS) return;
+  benchShownAt = now;
+  const rate = received / ((now - benchStarted) / 1000) / 1024;
+  lastEvent.value = `测速中… ${Math.round((received / total) * 100)}%（${rate.toFixed(1)} KB/s）`;
+}
+
+// 下行进度由手机自己从帧头算：电脑端在发大帧时插不进任何消息。
+function showReceiveProgress({ received, total }) {
+  // 只有测速消息会这么大，心跳、剪贴板不管。
+  if (!benching.value || total < BENCH_BYTES) return;
+  showBenchProgress(received, total);
+}
+
 async function benchUplink() {
   if (benching.value) return;
   benching.value = true;
+  benchStarted = performance.now();
+  benchShownAt = 0;
   // 只改事件行，不发 log 消息：日志写在计时窗口之前会污染测量。
   lastEvent.value = '测速中…';
   try {
     // 单包大小先取：写完再看，链路可能已经断了。
     const chunk = uplinkChunkSize();
-    const started = performance.now();
-    await sendAsync({ t: 'benchup', v: BENCH_PAYLOAD });
+    await sendAsync({ t: 'benchup', v: BENCH_PAYLOAD }, showBenchProgress);
     note(
       describeBench('上行', {
         bytes: BENCH_BYTES,
-        ms: performance.now() - started,
+        ms: performance.now() - benchStarted,
         chunk,
       }),
     );
@@ -216,8 +239,10 @@ async function benchUplink() {
 function benchDownlink() {
   if (benching.value) return;
   benching.value = true;
+  benchStarted = performance.now();
+  benchShownAt = 0;
   lastEvent.value = '测速中…';
-  // 计时和结果都在电脑端，这里只等 benchend 回来。
+  // 计时和结果都在电脑端，进度由收到的半帧算，这里只负责发起。
   send({ t: 'benchdown' });
 }
 

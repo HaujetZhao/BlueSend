@@ -51,6 +51,20 @@ test('长度字段跨多个字节', () => {
   assert.deepEqual(new FrameDecoder().push(frame), [payload]);
 });
 
+test('半帧时能报出已收与总长', () => {
+  const frame = encodeFrame({ t: 'text', v: 'a'.repeat(1000) });
+  const decoder = new FrameDecoder();
+  assert.equal(decoder.progress(), null);
+  assert.deepEqual(decoder.push(frame.subarray(0, 2)), []);
+  // 长度前缀还没凑齐，无从报进度。
+  assert.equal(decoder.progress(), null);
+  assert.deepEqual(decoder.push(frame.subarray(2, 500)), []);
+  assert.deepEqual(decoder.progress(), { received: 500, total: frame.length });
+  // 帧拼齐被取走后，再没有半帧。
+  assert.equal(decoder.push(frame.subarray(500)).length, 1);
+  assert.equal(decoder.progress(), null);
+});
+
 test('分片边界落在 UTF-8 多字节字符中间', () => {
   const payload = { t: 'text', v: '你好' };
   const frame = encodeFrame(payload);

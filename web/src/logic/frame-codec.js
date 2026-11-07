@@ -32,6 +32,18 @@ export class FrameDecoder {
     return messages;
   }
 
+  // 当前正在拼的这一帧已收多少字节、总共多少字节；没有半帧时返回 null。
+  // 测速时用它显示下行进度——长度前缀就在帧头，接收方不用等帧拼完再问。
+  progress() {
+    if (this.#buffer.length < 4) return null;
+    const length = new DataView(
+      this.#buffer.buffer,
+      this.#buffer.byteOffset,
+      4,
+    ).getUint32(0, false);
+    return { received: this.#buffer.length, total: 4 + length };
+  }
+
   reset() {
     this.#buffer = new Uint8Array(0);
   }

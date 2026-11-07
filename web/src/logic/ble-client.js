@@ -36,6 +36,7 @@ export class BleClient {
   #onEvent;
   #onClipboard;
   #onBench;
+  #onReceiveProgress;
 
   #device = null;
   // 上下行两条特征值永远同时存在，用一次赋值一起拿进来，不作分别判空。
@@ -58,11 +59,12 @@ export class BleClient {
   #generation = 0;
   #disposed = false;
 
-  constructor({ onState, onEvent, onClipboard, onBench }) {
+  constructor({ onState, onEvent, onClipboard, onBench, onReceiveProgress }) {
     this.#onState = onState;
     this.#onEvent = onEvent;
     this.#onClipboard = onClipboard;
     this.#onBench = onBench;
+    this.#onReceiveProgress = onReceiveProgress;
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
   }
 
@@ -173,9 +175,9 @@ export class BleClient {
   }
 
   // 只在已宣布连接时使用：返回的 Promise 在最后一片收到 ATT 应答后 resolve。
-  // 测速用它把「整条消息写完」的耗时框出来。
-  sendAsync(message) {
-    return this.#queue(this.#link, message, this.#generation).then((written) => {
+  // 测速用它把「整条消息写完」的耗时框出来；onProgress 每写完一片调一次。
+  sendAsync(message, onProgress) {
+    return this.#queue(this.#link, message, this.#generation, onProgress).then((written) => {
       // 断线时队列里的帧会被静默跳过，测速不能把「没发出去」算成「发得很快」。
       if (!written) throw new Error('链路已切换，本帧作废');
     });
@@ -193,10 +195,10 @@ export class BleClient {
     }
   }
 
-  #queue(link, message, generation) {
+  #queue(link, message, generation, onProgress) {
     const frame = encodeFrame(message);
     const write = this.#writeChain.then(() =>
-      this.#writeFrame(link.uplink, frame, generation),
+      this.#writeFrame(link.uplink, frame, generation, onProgress),
     );
     this.#writeChain = write.catch((err) => {
       console.error('发送失败', message.t, err);
@@ -253,7 +255,7 @@ export class BleClient {
     }
   }
 
-  async #writeFrame(uplink, frame, generation) {
+  async #writeFrame(uplink, frame, generation, onProgress) {
     const size = chunkSizeOf(uplink);
     for (let i = 0; i < frame.length; i += size) {
       // 链路已经换了或断了，旧队列里的分片不再写。返回值告诉 sendAsync 这一帧作废。
@@ -262,6 +264,7 @@ export class BleClient {
       await writeWithTimeout(
         uplink.writeValueWithResponse(frame.subarray(i, i + size)),
       );
+      onProgress?.(Math.min(i + size, frame.length), frame.length);
     }
     return true;
   }
@@ -286,7 +289,11 @@ export class BleClient {
       // 断开重连，让两端从干净状态开始。
       console.error('接收数据解析失败', err);
       this.#handleDrop('接收数据解析失败');
+      return;
     }
+    // 帧被取走后缓冲里剩下的就是半帧，进度只看它。没有半帧时是 null。
+    const progress = this.#decoder.progress();
+    if (progress) this.#onReceiveProgress(progress);
   };
 
   #dispatch(message) {
