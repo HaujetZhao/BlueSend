@@ -8,27 +8,34 @@ from urllib.parse import quote
 import pytest
 
 from bluetooth_input.upload_server import (
+    UploadService,
     reserve_path,
     sanitize_filename,
-    start_upload_server,
 )
 
 
 @pytest.fixture
 def service(tmp_path):
-    server = start_upload_server(directory=tmp_path, port=0)
+    server = UploadService(
+        {"desktop": tmp_path / "desktop", "downloads": tmp_path / "downloads"}, 0
+    )
     yield server
     server.stop()
 
 
-def post_file(port: int, token: str, filename: str, body: bytes):
+def post_file(
+    port: int, token: str, filename: str, body: bytes, target: str | None = "downloads"
+):
+    headers = {"X-Filename": quote(filename)}
+    if target is not None:
+        headers["X-Target"] = target
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         connection.request(
             "POST",
             f"/upload?t={token}",
             body=body,
-            headers={"X-Filename": quote(filename)},
+            headers=headers,
         )
         return connection.getresponse()
     finally:
@@ -87,38 +94,88 @@ def test_get_rejects_wrong_token(service, token):
 
 
 def test_post_writes_file_and_dedupes(service, tmp_path):
+    downloads = tmp_path / "downloads"
     payload = bytes(range(256)) * 1024
     response = post_file(service.port, service.token, "照片 01.jpg", payload)
     assert response.status == 200
     saved = json.loads(response.read())
     assert saved == {"ok": True, "name": "照片 01.jpg"}
-    assert (tmp_path / "照片 01.jpg").read_bytes() == payload
+    assert (downloads / "照片 01.jpg").read_bytes() == payload
 
     response = post_file(service.port, service.token, "照片 01.jpg", b"again")
     assert json.loads(response.read())["name"] == "照片 01 (1).jpg"
-    assert (tmp_path / "照片 01 (1).jpg").read_bytes() == b"again"
-    assert list(tmp_path.glob(".bt-upload-*")) == []
+    assert (downloads / "照片 01 (1).jpg").read_bytes() == b"again"
+    assert list(downloads.glob(".bt-upload-*")) == []
 
 
 def test_post_saves_reserved_device_name(service, tmp_path):
+    downloads = tmp_path / "downloads"
     response = post_file(service.port, service.token, "CON.txt", b"data")
     assert response.status == 200
     assert json.loads(response.read())["name"] == "_CON.txt"
-    assert (tmp_path / "_CON.txt").read_bytes() == b"data"
+    assert (downloads / "_CON.txt").read_bytes() == b"data"
 
 
 def test_post_reports_reserve_failure(service, tmp_path):
-    (tmp_path / "taken.bin").mkdir()
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    (downloads / "taken.bin").mkdir()
     response = post_file(service.port, service.token, "taken.bin", b"data")
     assert response.status == 500
     assert json.loads(response.read())["ok"] is False
-    assert (tmp_path / "taken.bin").is_dir()
+    assert (downloads / "taken.bin").is_dir()
+
+
+def test_post_routes_to_desktop_and_downloads(service, tmp_path):
+    desktop = tmp_path / "desktop"
+    downloads = tmp_path / "downloads"
+
+    response = post_file(
+        service.port, service.token, "a.txt", b"desktop", target="desktop"
+    )
+    assert response.status == 200
+    response = post_file(
+        service.port, service.token, "a.txt", b"downloads", target="downloads"
+    )
+    assert response.status == 200
+
+    assert (desktop / "a.txt").read_bytes() == b"desktop"
+    assert (downloads / "a.txt").read_bytes() == b"downloads"
+
+
+def test_post_creates_target_folder(service, tmp_path):
+    downloads = tmp_path / "downloads"
+    assert not downloads.exists()
+
+    response = post_file(service.port, service.token, "a.txt", b"x")
+
+    assert response.status == 200
+    assert (downloads / "a.txt").read_bytes() == b"x"
+
+
+def test_post_requires_target(service, tmp_path):
+    response = post_file(service.port, service.token, "a.txt", b"x", target=None)
+    assert response.status == 400
+    assert json.loads(response.read())["ok"] is False
+    assert not (tmp_path / "desktop").exists()
+    assert not (tmp_path / "downloads").exists()
+
+
+def test_post_rejects_unknown_target(service, tmp_path):
+    response = post_file(
+        service.port, service.token, "a.txt", b"x", target="../../etc"
+    )
+    assert response.status == 400
+    assert json.loads(response.read())["ok"] is False
+    assert not (tmp_path / "desktop").exists()
+    assert not (tmp_path / "downloads").exists()
 
 
 def test_post_rejects_wrong_token(service, tmp_path):
     response = post_file(service.port, "wrong", "a.txt", b"x")
     assert response.status == 403
-    assert list(tmp_path.iterdir()) == []
+    assert not (tmp_path / "desktop").exists()
+    assert not (tmp_path / "downloads").exists()
 
 
 def test_post_requires_content_length(service, tmp_path):
@@ -126,32 +183,39 @@ def test_post_requires_content_length(service, tmp_path):
     try:
         connection.putrequest("POST", f"/upload?t={service.token}")
         connection.putheader("X-Filename", "a.txt")
+        connection.putheader("X-Target", "downloads")
         connection.endheaders()
         response = connection.getresponse()
         assert response.status == 411
     finally:
         connection.close()
-    assert list(tmp_path.iterdir()) == []
+    assert not (tmp_path / "desktop").exists()
+    assert not (tmp_path / "downloads").exists()
 
 
 def test_interrupted_upload_leaves_nothing(service, tmp_path):
+    downloads = tmp_path / "downloads"
     connection = http.client.HTTPConnection("127.0.0.1", service.port, timeout=5)
     connection.putrequest("POST", f"/upload?t={service.token}")
     connection.putheader("X-Filename", "half.bin")
+    connection.putheader("X-Target", "downloads")
     connection.putheader("Content-Length", "1024")
     connection.endheaders()
     connection.send(b"only a few bytes")
 
-    # 服务端已建好占位文件与 .part，正阻塞等剩余字节。先确认它们真的存在，
-    # 否则下面的「清空」断言可能什么都没验证到。
+    # 服务端已建好目标目录、占位文件与 .part，正阻塞等剩余字节。先确认它们
+    # 真的存在，否则下面的「清空」断言可能什么都没验证到。
     deadline = time.monotonic() + 2
-    while not any(tmp_path.iterdir()) and time.monotonic() < deadline:
+    while (
+        not (downloads.exists() and any(downloads.iterdir()))
+        and time.monotonic() < deadline
+    ):
         time.sleep(0.01)
-    assert any(tmp_path.iterdir())
+    assert downloads.exists() and any(downloads.iterdir())
 
     connection.close()
 
     deadline = time.monotonic() + 2
-    while any(tmp_path.iterdir()) and time.monotonic() < deadline:
+    while any(downloads.iterdir()) and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert list(tmp_path.iterdir()) == []
+    assert list(downloads.iterdir()) == []

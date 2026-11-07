@@ -21,7 +21,7 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
 from winrt.windows.storage.streams import DataWriter
 
 from .clipboard import get_clipboard_text, set_clipboard_text
-from .config import load_wm_char_apps
+from .config import load_upload_folder, load_wm_char_apps
 from .frame_codec import Decoder, FrameError, UplinkAssembler, encode
 from .protocol import (
     DOWNLINK_UUID,
@@ -88,7 +88,7 @@ async def serve() -> None:
 
     # 文件上传走局域网 HTTP：蓝牙只负责把入口 URL 送到手机。入口地址随 net
     # 消息在每次订阅变化时下发（连接作用域，同 mtu）。
-    uploads = start_upload_server()
+    uploads = start_upload_server(load_upload_folder())
     logger.info("文件上传入口：%s", "、".join(uploads.urls()) or "没有可用的局域网地址")
 
     loop = asyncio.get_running_loop()

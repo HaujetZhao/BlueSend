@@ -60,6 +60,36 @@
     color: var(--text-muted);
   }
 
+  .targets {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .target {
+    flex: 1;
+    height: 40px;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .target:hover {
+    background: rgba(255, 255, 255, 0.09);
+  }
+
+  .target.active {
+    color: #aab3ff;
+    background: rgba(99, 102, 241, 0.16);
+    border-color: rgba(99, 102, 241, 0.45);
+  }
+
   .pick {
     display: flex;
     align-items: center;
@@ -162,7 +192,12 @@
 <body>
 <main>
   <h1>发送文件到电脑</h1>
-  <p class="hint">文件会保存到电脑的「下载」文件夹。可以多选，按顺序逐个上传。</p>
+  <p class="hint">文件会保存到电脑上你选的位置。可以多选，按顺序逐个上传。</p>
+
+  <div class="targets">
+    <button type="button" class="target" data-target="desktop">桌面</button>
+    <button type="button" class="target active" data-target="downloads">下载</button>
+  </div>
 
   <label class="pick">
     选择文件
@@ -178,6 +213,18 @@
   const picker = document.getElementById('picker');
   const list = document.getElementById('list');
   const summary = document.getElementById('summary');
+  const targetButtons = document.querySelectorAll('.target');
+
+  let target = 'downloads';
+
+  for (const button of targetButtons) {
+    button.addEventListener('click', () => {
+      target = button.dataset.target;
+      for (const other of targetButtons) {
+        other.classList.toggle('active', other === button);
+      }
+    });
+  }
 
   const queue = [];
   let running = false;
@@ -235,8 +282,10 @@
         }, STALL_TIMEOUT_MS);
       }
 
+      // 只影响还没开始的文件：请求头在这里就定下了，切换按钮不会改动已发出的请求。
       xhr.open('POST', '/upload?t=' + encodeURIComponent(token));
       xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+      xhr.setRequestHeader('X-Target', target);
       xhr.upload.onprogress = (event) => {
         pet();
         if (!event.lengthComputable) return;

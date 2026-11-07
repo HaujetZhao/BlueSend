@@ -57,7 +57,7 @@ E:\repos\Bluetooth-Input\
 │   │   ├── upload_server.py    局域网文件上传服务（HTTP，后台线程）
 │   │   ├── upload_page.html    上传页（自包含单文件，由上传服务返回）
 │   │   ├── config.py           config.toml 读取
-│   │   └── config.toml         上屏兼容名单
+│   │   └── config.toml         上屏兼容名单、上传落点
 │   ├── tests\                  pytest
 │   └── logs\                   服务端日志（gitignore）
 ├── docs\superpowers\           历史设计与计划文档（保留原貌）
@@ -260,7 +260,7 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 - 多实例、多标签页会互抢同一台设备（见坑 8、9）。
 - 文件上传要求手机与电脑在同一局域网；Windows 防火墙首次需放行 python 入站，否则上传页打不开（蓝牙不受影响）。
 - 文件上传结果不回流蓝牙：进度只在上传页显示，主页面不感知。
-- 传输途中强制关闭电脑端（Ctrl+C）时，下载目录可能残留隐藏的 `.bt-upload-*.part`，手动删除即可。
+- 传输途中强制关闭电脑端（Ctrl+C）时，目标目录可能残留隐藏的 `.bt-upload-*.part`，手动删除即可。
 
 ## 八、调试手法
 

@@ -11,3 +11,9 @@ def load_wm_char_apps() -> set[str]:
     with CONFIG_PATH.open("rb") as file:
         apps = tomllib.load(file)["wm_char_apps"]
     return {app.lower() for app in apps}
+
+
+def load_upload_folder() -> str:
+    """返回上传文件落点的子文件夹名。"""
+    with CONFIG_PATH.open("rb") as file:
+        return tomllib.load(file)["upload"]["folder"]

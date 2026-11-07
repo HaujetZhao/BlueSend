@@ -39,13 +39,21 @@ RESERVED_NAMES = {
 }
 
 
-def downloads_dir() -> Path:
-    """系统「下载」文件夹。用已知文件夹，尊重用户把下载目录迁到别的盘。"""
-    return Path(shell.SHGetKnownFolderPath(shellcon.FOLDERID_Downloads, 0, None))
+def known_folder(folder_id) -> Path:
+    """Windows 已知文件夹的绝对路径。不写死盘符，用户把目录迁到别的盘也对。"""
+    return Path(shell.SHGetKnownFolderPath(folder_id, 0, None))
+
+
+def target_dirs(folder: str) -> dict[str, Path]:
+    """上传落点：桌面／下载文件夹下的同名子文件夹，子文件夹名来自配置。"""
+    return {
+        "desktop": known_folder(shellcon.FOLDERID_Desktop) / folder,
+        "downloads": known_folder(shellcon.FOLDERID_Downloads) / folder,
+    }
 
 
 def sanitize_filename(raw: str) -> str:
-    """把对端给的名字变成下载目录下的一个安全文件名。
+    """把对端给的名字变成目标目录下的一个安全文件名。
 
     先按两种分隔符取 basename，路径穿越就无从谈起；再剔除 Windows 非法字符；
     设备名加下划线前缀——带扩展名的 `CON.txt` 同样会被 Windows 当成设备。
@@ -125,7 +133,9 @@ def lan_hosts() -> list[str]:
     return hosts
 
 
-def _make_handler(directory: Path, token: str) -> type[BaseHTTPRequestHandler]:
+def _make_handler(
+    targets: dict[str, Path], token: str
+) -> type[BaseHTTPRequestHandler]:
     class UploadHandler(BaseHTTPRequestHandler):
         # 一次读阻塞超过 5 分钟就放弃，别让线程无限挂在一个死连接上。
         timeout = 300
@@ -176,6 +186,12 @@ def _make_handler(directory: Path, token: str) -> type[BaseHTTPRequestHandler]:
             if not self._authorized():
                 self.send_error(403)
                 return
+            # 落点只认这张表，外部输入不能拼进路径；不合法就到此为止，不碰磁盘。
+            target = self.headers.get("X-Target")
+            if target not in targets:
+                self._send_json(400, {"ok": False, "error": "保存位置非法"})
+                return
+            directory = targets[target]
             raw_name = self.headers.get("X-Filename")
             if raw_name is None:
                 self._send_json(400, {"ok": False, "error": "缺少 X-Filename"})
@@ -200,8 +216,13 @@ def _make_handler(directory: Path, token: str) -> type[BaseHTTPRequestHandler]:
             final = None
             temporary = None
             try:
+                # 建目录失败和写盘失败走同一条 500 路径，不会直接断连接。
+                directory.mkdir(parents=True, exist_ok=True)
                 final = reserve_path(directory, name)
-                logger.info("收到文件 %s（%.1f MB）", name, remaining / 1024 / 1024)
+                logger.info(
+                    "收到文件 %s → %s（%.1f MB）",
+                    name, directory.name, remaining / 1024 / 1024,
+                )
                 temporary = tempfile.NamedTemporaryFile(
                     prefix=".bt-upload-", suffix=".part", dir=directory, delete=False
                 )
@@ -234,9 +255,9 @@ def _make_handler(directory: Path, token: str) -> type[BaseHTTPRequestHandler]:
 class UploadService:
     """后台线程里跑的上传服务。生命周期跟随主进程。"""
 
-    def __init__(self, directory: Path, port: int) -> None:
+    def __init__(self, targets: dict[str, Path], port: int) -> None:
         self.token = secrets.token_urlsafe(16)
-        handler = _make_handler(directory, self.token)
+        handler = _make_handler(targets, self.token)
         try:
             self._server = ThreadingHTTPServer(("0.0.0.0", port), handler)
         except OSError:
@@ -264,7 +285,5 @@ class UploadService:
         self._server.server_close()
 
 
-def start_upload_server(
-    directory: Path | None = None, port: int = UPLOAD_PORT
-) -> UploadService:
-    return UploadService(directory or downloads_dir(), port)
+def start_upload_server(folder: str, port: int = UPLOAD_PORT) -> UploadService:
+    return UploadService(target_dirs(folder), port)
