@@ -17,7 +17,13 @@
 
 ## 使用方法
 
-### 1. 电脑端启动服务
+### 1. 安装依赖
+
+```powershell
+npm install
+```
+
+### 2. 电脑端启动服务
 
 需要 Python 3.12+，依赖用 [uv](https://docs.astral.sh/uv/) 管理：
 
@@ -28,15 +34,27 @@ uv run python server.py
 
 看到「广播状态：Started」就已经在等手机连接了。
 
-### 2. 手机端连接
+### 3. 手机端连接
 
-手机浏览器打开 **https://haujetzhao.github.io/Bluetooth-Input/** ，点「扫描连接」选中你的电脑即可。
+**在线版**：手机浏览器打开 **https://haujetzhao.github.io/Bluetooth-Input/** ，点「扫描连接」选中你的电脑即可。
 
-如果不想走 GitHub Pages，也可以在本地起 HTTPS 服务（Web Bluetooth 要求安全上下文）：
+**本地开发**：电脑运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书。
+
+**单文件本地托管**：
 
 ```powershell
+npm run build
 uv run --project pc python serve_web.py
-# 手机访问 https://<电脑局域网IP>:8443 ，需要信任一次自签证书
+# 手机访问 https://<电脑局域网 IP>:8443
+```
+
+换网络导致局域网 IP 变化、证书不匹配时，重签一次：
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout certs/key.pem -out certs/cert.pem -days 3650 \
+  -subj "/CN=ble-local" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:<当前局域网IP>"
 ```
 
 ## 手机浏览器要求
@@ -48,25 +66,29 @@ uv run --project pc python serve_web.py
 
 ## 目录结构
 
-```
-├── index.html              手机端页面
-├── static/                 页面脚本、样式与自签证书
-├── serve_web.py            本地 HTTPS 静态服务（纯标准库）
+```text
+├── index.html              Vite 入口
+├── src/                    Vue 源码
+│   ├── App.vue             页面与输入交互
+│   ├── styles.css          样式
+│   ├── logic/              帧编解码、协议常量、BLE 客户端
+│   └── composables/        useBle 响应式封装
+├── public/                 PWA 图标
+├── certs/                  自签证书
+├── serve_web.py            本地 HTTPS 静态服务，托管 dist/
 ├── protocol.md             协议：UUID、帧格式、消息类型
 ├── pc/                     电脑端
-│   ├── server.py           WinRT GATT Server：广播、写请求应答、JSON 分发、心跳
-│   ├── frame_codec.py      帧编解码
-│   ├── clipboard.py        Win32 剪贴板读写
-│   └── tests/              帧编解码单测
-├── docs/HANDOFF.md         开发交接文档（架构、踩过的坑、环境事实）
-└── bt_serial_receiver.py   早期 RFCOMM 串口方案，保留备用，未接入当前架构
+├── docs/HANDOFF.md         开发交接文档
+└── bt_serial_receiver.py   早期 RFCOMM 串口方案，保留备用
 ```
 
 ## 开发
 
 ```powershell
-cd pc
-uv run pytest          # 帧编解码单测
+npm run dev        # HTTPS 开发服务器，手机可访问
+npm test           # 帧编解码单测
+npm run build      # 单文件产物 dist/index.html
+npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
-改协议时，`protocol.md`、`pc/server.py`、`static/app.js` 三处必须同步。
+改协议时，`protocol.md`、`pc/server.py`、`src/logic/protocol.js`、`src/logic/frame-codec.js` 必须同步。

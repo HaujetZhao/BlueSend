@@ -26,50 +26,34 @@
 
 ## 三、代码地图
 
-```
+```text
 E:\repos\Bluetooth-Input\
 ├── readme.md                   对外说明
-├── protocol.md                 协议的唯一事实来源（UUID、帧格式、消息类型）
-├── index.html                  手机端页面
-├── static\app.js               网页逻辑：连接、帧编解码、MTU 切片、即时输入、剪贴板
-├── static\style.css
-├── static\{cert,key}.pem       自签证书，本地托管时用
-├── serve_web.py                HTTPS 静态服务（纯标准库）
-├── pc\
-│   ├── server.py               WinRT GATT Server：广播、写请求同步应答、JSON 分发、按 MTU 分片通知
-│   ├── frame_codec.py          帧编解码（4 字节长度 + UTF-8）
-│   ├── protocol.py             UUID 常量
-│   ├── clipboard.py            Win32 剪贴板读写（ctypes，零依赖）
-│   ├── pyproject.toml          uv 依赖（winrt-*、keyboard）
-│   ├── uv.lock
-│   └── tests\test_frame_codec.py
-├── bt_serial_receiver.py       早期 RFCOMM 串口方案，保留备用，未接入当前架构
-└── .trash\                     废弃文件暂存区，可随时手动清掉
+├── protocol.md                 协议的唯一事实来源
+├── index.html                  Vite 入口
+├── src\
+│   ├── App.vue                 手机端页面与输入交互
+│   ├── styles.css
+│   ├── logic\protocol.js       UUID 与链路参数
+│   ├── logic\frame-codec.js    帧编解码
+│   ├── logic\ble-client.js     连接、重连、心跳、写队列
+│   └── composables\useBle.js   Vue 响应式封装
+├── public\                     PWA 图标
+├── certs\{cert,key}.pem        自签证书
+├── serve_web.py                托管 dist/ 的 HTTPS 静态服务
+├── pc\                         电脑端
+└── .trash\                     废弃文件暂存区
 ```
 
 ## 四、怎么跑
 
-先从 PowerShell 确认没有僵尸实例——**多实例会互相抢广播，症状极难认**：
-
 ```powershell
-Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object ProcessId,CommandLine
+npm install
+npm run dev                    # 手机打开 https://<局域网IP>:5173
+npm run build                  # 单文件产物
+npm run build:pwa              # PWA 产物
+uv run --project pc python serve_web.py   # 托管 dist/，端口 8443
 ```
-
-再启动电脑端：
-
-```powershell
-cd E:\repos\Bluetooth-Input\pc
-uv run python server.py
-```
-
-看到 `广播状态：Started`（数值 2）就是在等手机连接。日志同时写 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。
-
-手机端两条路：
-
-- **GitHub Pages**：`https://haujetzhao.github.io/Bluetooth-Input/`。注意线上此刻还是旧页面（新的没 push），要么先 push，要么用下面这条
-- **本地托管**：`uv run --project pc python serve_web.py`，手机开 `https://<电脑局域网IP>:8443`，首次要信任一次自签证书
-
-连上后点「扫描连接」→ 选中电脑。页面状态栏下面那行小字会写「已连接（第 N 段）」，断开时写原因和上一段存活时长。
 
 ## 五、踩过的坑
 
@@ -187,5 +171,5 @@ curl -s http://127.0.0.1:9222/json      # 列出标签页，拿 webSocketDebugge
 - 提交信息不加 `Co-Authored-By`
 - 不直接删文件，要删就移到项目内 `.trash/`
 - 界面观感由用户本人判断（过渡顺不顺、布局观感），我只负责客观断言：日志、编译、DOM/样式读数
-- 改协议时 `protocol.md`、`pc/server.py`、`static/app.js` 三处必须同步
+- 改协议时 `protocol.md`、`pc/server.py`、`src/logic/protocol.js`、`src/logic/frame-codec.js` 必须同步
 - 独立的搜索、多文件改动、机械核对优先派 subagent，主会话做编排与审阅
