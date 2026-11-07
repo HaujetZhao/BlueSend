@@ -197,13 +197,20 @@ let benchStarted = 0;
 let benchDoneAt = 0;
 let benchShownAt = 0;
 
-// 速率用「已传字节 ÷ 至今耗时」，是平均值，不逐片抖动。
+// 过程只报百分比，速率一律只在结果行出现。
+// 上行的进度来自无响应写的 resolve，那是「进了协议栈队列」而不是「上了空中」——
+// 实测入队 3.7 毫秒/片、空口 5.9 毫秒/片。拿它算速率会比真实值高出一截，等最后
+// 一片的 ATT 应答回来又被总时间打回原形，看着就是「卡两秒、速度腰斩」。下行的进度
+// 虽然是真实收到的字节，但一次测速只有几秒，过程速率没什么意义，口径统一更安静。
 function showBenchProgress(received, total) {
   const now = performance.now();
-  if (now - benchShownAt < PROGRESS_INTERVAL_MS) return;
+  const percent = Math.floor((received / total) * 100);
+  // 最后一片要等前面所有分片排空，期间没有新的进度可报，别被节流吞掉。
+  if (percent < 99 && now - benchShownAt < PROGRESS_INTERVAL_MS) return;
   benchShownAt = now;
-  const rate = received / ((now - benchStarted) / 1000) / 1024;
-  lastEvent.value = `测速中… ${Math.round((received / total) * 100)}%（${rate.toFixed(1)} KB/s）`;
+  lastEvent.value = benchDirection === 'up' && percent >= 99
+    ? '测速中… 99%（等待链路确认）'
+    : `测速中… ${percent}%`;
 }
 
 // 下行进度由手机自己从帧头算：电脑端的 notify 返回时只是把数据塞进了发送队列，
@@ -271,11 +278,12 @@ async function showBenchResult({ bytes, chunk, sha256, payload }) {
   // 电脑端每次发随机载荷，哈希对不上就是分片被调换、重复或丢了字节。
   // 这种情况帧仍是合法 JSON，长度也对，前面那些检查一律看不出来。
   const actual = await sha256Hex(payload);
-  const check =
+  // 通过就不必说：结果行本来就够长了，多一段哈希还要换行。失败才顶上去。
+  note(
     actual === sha256
-      ? `校验通过（${actual.slice(0, 8)}）`
-      : `校验失败：收到 ${actual.slice(0, 8)}，应为 ${sha256.slice(0, 8)}`;
-  note(`${summary} · ${check}`);
+      ? summary
+      : `${summary} · 内容校验失败（${actual.slice(0, 8)}≠${sha256.slice(0, 8)}）`,
+  );
 }
 
 // 同一个页面开多个标签页时，每个标签页都是一路独立的 Web Bluetooth 客户端，
