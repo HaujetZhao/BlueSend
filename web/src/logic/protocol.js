@@ -12,3 +12,5 @@ export const RECONNECT_INTERVAL_MS = 2000;
 // 正常 ATT 应答不到 100 毫秒。超过这个时间还没回来，链路在实践上已经不可用，
 // 不必等满 ATT 规定的 30 秒事务超时——那段时间里所有输入都会堵在写队列里。
 export const WRITE_ACK_TIMEOUT_MS = 2000;
+// 测速载荷大小：每次测速固定 256 KB，与 pc/bluetooth_input/protocol.py 一致。
+export const BENCH_BYTES = 256 * 1024;

@@ -43,7 +43,7 @@
 
 ## 手机端
 
-- `BleClient` 新增 `sendAsync(message)`：与 `send()` 共用 `#queue`，返回写链的 Promise。仅在已宣布连接时使用；`#link` 为空时同步抛错，由调用方按「链路未就绪」处理。
+- `BleClient` 新增 `sendAsync(message)`：与 `send()` 共用 `#queue`，返回写链的 Promise。仅在已宣布连接时使用。断线时写链里的帧会被静默跳过（`#writeFrame` 提前返回），所以 `#writeFrame` 改成返回「整帧是否写完」，`sendAsync` 发现没写完就 reject，避免把「没发出去」测成「飞一样快」。
 - `BleClient` 新增 `onBench` 回调：`benchend` 到达时把 `{ bytes, ms, chunk }` 交给页面。
 - `#dispatch` 增加两个分支：`benchdata` 丢弃（不报「未知消息」），`benchend` 走 `onBench`。
 - 页面新增一组按钮「测上行」「测下行」，未连接或测速中禁用。
@@ -55,7 +55,7 @@
 
 - `benchup`：只记一行 `logger.info("上行测速：收到 %d 字节", len(v))`，不做别的。
 - `benchdown`：在 `handle()` 里 `await` 先发一条 `benchdata`，再发 `benchend`。发送期间读循环被占住十几秒，此刻用户输入会积在 `incoming` 队列，测完再上屏——测速本来就要独占链路，可以接受。
-- `bytes` 字段从对端来，按信任边界夹到 `MAX_FRAME_BYTES` 以内，防止对端索取 GB 级内存。
+- 载荷大小是两端各自的常量，`benchdown` 不带任何尺寸参数，电脑端不接受对端指定的大小。
 
 ## 失败路径
 

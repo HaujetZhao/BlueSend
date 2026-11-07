@@ -22,6 +22,11 @@ function writeWithTimeout(write) {
   return Promise.race([write, timeout]).finally(() => clearTimeout(timer));
 }
 
+// 上行单包大小：拿不到协商后的上限时退回 4.2 的默认 MTU。
+function chunkSizeOf(uplink) {
+  return uplink.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
+}
+
 // 重连可能无限进行（见坑 11），积压不设上限会一直吃内存；溢出时丢最旧的，
 // 保住用户最近打的字。这些消息还没交给写链，不属于坑 12 禁止的应用层重传。
 const OUTBOX_LIMIT = 100;
@@ -30,6 +35,7 @@ export class BleClient {
   #onState;
   #onEvent;
   #onClipboard;
+  #onBench;
 
   #device = null;
   // 上下行两条特征值永远同时存在，用一次赋值一起拿进来，不作分别判空。
@@ -52,15 +58,21 @@ export class BleClient {
   #generation = 0;
   #disposed = false;
 
-  constructor({ onState, onEvent, onClipboard }) {
+  constructor({ onState, onEvent, onClipboard, onBench }) {
     this.#onState = onState;
     this.#onEvent = onEvent;
     this.#onClipboard = onClipboard;
+    this.#onBench = onBench;
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
   }
 
   note(text) {
     this.#note(text);
+  }
+
+  // 上行实际使用的单包大小，测速时随结果一起上报。
+  get uplinkChunkSize() {
+    return chunkSizeOf(this.#link.uplink);
   }
 
   async requestDevice() {
@@ -160,6 +172,15 @@ export class BleClient {
     return true;
   }
 
+  // 只在已宣布连接时使用：返回的 Promise 在最后一片收到 ATT 应答后 resolve。
+  // 测速用它把「整条消息写完」的耗时框出来。
+  sendAsync(message) {
+    return this.#queue(this.#link, message, this.#generation).then((written) => {
+      // 断线时队列里的帧会被静默跳过，测速不能把「没发出去」算成「发得很快」。
+      if (!written) throw new Error('链路已切换，本帧作废');
+    });
+  }
+
   // 本轮重连已经宣布，按顺序把积压交给写链。若写链随后失败，代际作废会让
   // 剩余消息自然不再写出，按坑 12 的语义丢弃，不做应用层重试。
   #flushOutbox() {
@@ -233,15 +254,16 @@ export class BleClient {
   }
 
   async #writeFrame(uplink, frame, generation) {
-    const size = uplink.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
+    const size = chunkSizeOf(uplink);
     for (let i = 0; i < frame.length; i += size) {
-      // 链路已经换了或断了，旧队列里的分片不再写。
-      if (generation !== this.#generation) return;
+      // 链路已经换了或断了，旧队列里的分片不再写。返回值告诉 sendAsync 这一帧作废。
+      if (generation !== this.#generation) return false;
       // 必须用带响应写：只有它由 ATT 保证先后顺序，无响应写会让分片乱序。
       await writeWithTimeout(
         uplink.writeValueWithResponse(frame.subarray(i, i + size)),
       );
     }
+    return true;
   }
 
   #onDeviceDisconnect = () => this.#handleDrop('物理断开');
@@ -250,6 +272,9 @@ export class BleClient {
     // 断线前排队的回调可能在重连成功后才执行。只认当前链路的特征值，
     // 否则旧链路的字节会被灌进新链路的解码器，把帧边界带偏。
     if (event.target !== this.#link?.downlink) return;
+    // 收到字节就说明链路活着。不能等整条消息拼齐才喂狗：一条 256 KB 的测速
+    // 消息要十几秒才凑满，那期间心跳也发不出来（一帧的字节流必须原子发送）。
+    this.#noteAlive();
     const view = event.target.value;
     const chunk = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
     try {
@@ -266,16 +291,20 @@ export class BleClient {
 
   #dispatch(message) {
     console.debug('收到', message.t);
-    this.#noteAlive();
     switch (message.t) {
       case 'hb':
       case 'pong':
+      case 'benchdata':
+        // 下行测速载荷本身没有用途，收到就丢，测速结果随后由 benchend 带来。
         break;
       case 'clip':
         this.#onClipboard(message.v);
         break;
       case 'notice':
         this.#emit(message.v);
+        break;
+      case 'benchend':
+        this.#onBench(message);
         break;
       default:
         console.warn('未知消息', message);

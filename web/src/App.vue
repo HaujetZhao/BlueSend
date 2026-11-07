@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useBle } from './composables/useBle.js';
+import { BENCH_BYTES } from './logic/protocol.js';
+import { BENCH_PAYLOAD, describeBench } from './logic/bench.js';
 import { needRefresh, updateServiceWorker } from '@pwa-update';
 
 const instantMode = ref(true);
@@ -9,6 +11,8 @@ const inputEl = ref(null);
 let composing = false;
 const hasEverConnected = ref(false);
 const hasTriedConnect = ref(false);
+// 测速期间两颗按钮都锁住：一次只跑一个方向。
+const benching = ref(false);
 
 const {
   status,
@@ -16,9 +20,12 @@ const {
   connected,
   connect: connectBle,
   send,
+  sendAsync,
+  uplinkChunkSize,
   note,
 } = useBle({
   onClipboard: applyPulledClipboard,
+  onBench: showBenchResult,
 });
 
 const statusLabel = computed(
@@ -40,7 +47,11 @@ const placeholder = computed(() => {
 });
 
 watch(status, (state) => {
-  if (state !== 'connected') return;
+  if (state !== 'connected') {
+    // 断线或重连期间结果不会再来，别把按钮一直锁着。
+    benching.value = false;
+    return;
+  }
   hasEverConnected.value = true;
   focusInput();
 });
@@ -178,6 +189,43 @@ async function applyPulledClipboard(content) {
   }
 }
 
+async function benchUplink() {
+  if (benching.value) return;
+  benching.value = true;
+  // 只改事件行，不发 log 消息：日志写在计时窗口之前会污染测量。
+  lastEvent.value = '测速中…';
+  try {
+    // 单包大小先取：写完再看，链路可能已经断了。
+    const chunk = uplinkChunkSize();
+    const started = performance.now();
+    await sendAsync({ t: 'benchup', v: BENCH_PAYLOAD });
+    note(
+      describeBench('上行', {
+        bytes: BENCH_BYTES,
+        ms: performance.now() - started,
+        chunk,
+      }),
+    );
+  } catch (err) {
+    note('上行测速中断：' + err.message);
+  } finally {
+    benching.value = false;
+  }
+}
+
+function benchDownlink() {
+  if (benching.value) return;
+  benching.value = true;
+  lastEvent.value = '测速中…';
+  // 计时和结果都在电脑端，这里只等 benchend 回来。
+  send({ t: 'benchdown' });
+}
+
+function showBenchResult({ bytes, ms, chunk }) {
+  benching.value = false;
+  note(describeBench('下行', { bytes, ms, chunk }));
+}
+
 // 同一个页面开多个标签页时，每个标签页都是一路独立的 Web Bluetooth 客户端，
 // 会互相抢同一台设备。开页时就探测并提醒。
 const tabChannel = new BroadcastChannel('ble-tab');
@@ -249,6 +297,23 @@ onUnmounted(() => tabChannel.close());
     <div class="clipboard-group">
       <button class="btn btn-pull" @click="pullClipboard">拉取剪贴板</button>
       <button class="btn btn-push" @click="pushClipboard">推送剪贴板</button>
+    </div>
+
+    <div class="bench-group">
+      <button
+        class="btn btn-bench"
+        :disabled="!connected || benching"
+        @click="benchUplink"
+      >
+        测上行
+      </button>
+      <button
+        class="btn btn-bench"
+        :disabled="!connected || benching"
+        @click="benchDownlink"
+      >
+        测下行
+      </button>
     </div>
   </div>
 </template>

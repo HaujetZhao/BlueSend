@@ -17,3 +17,7 @@ DOWNLINK_CHUNK_LIMIT = 512
 
 def downlink_chunk_size(reported: int) -> int:
     return min(reported, DOWNLINK_CHUNK_LIMIT)
+
+
+# 测速载荷大小：每次测速固定 256 KB。与 web/src/logic/protocol.js 保持一致。
+BENCH_BYTES = 256 * 1024

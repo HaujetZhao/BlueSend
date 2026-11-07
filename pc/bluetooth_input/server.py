@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 
 import keyboard
 from winrt.windows.devices.bluetooth import BluetoothError
@@ -20,13 +21,21 @@ from winrt.windows.storage.streams import DataWriter
 from .clipboard import get_clipboard_text, set_clipboard_text
 from .config import load_wm_char_apps
 from .frame_codec import Decoder, FrameError, encode
-from .protocol import DOWNLINK_UUID, SERVICE_UUID, UPLINK_UUID, downlink_chunk_size
+from .protocol import (
+    BENCH_BYTES,
+    DOWNLINK_UUID,
+    SERVICE_UUID,
+    UPLINK_UUID,
+    downlink_chunk_size,
+)
 from .text_input import type_text
 
 logger = logging.getLogger("ble")
 
 HEARTBEAT_SECONDS = 3
 FALLBACK_NOTIFICATION_SIZE = 20
+# 重复的可打印 ASCII：JSON 编码不产生转义，字符数与字节数一致，测量口径可预测。
+BENCH_PAYLOAD = "0123456789abcdef" * (BENCH_BYTES // 16)
 
 
 def to_buffer(data: bytes):
@@ -131,9 +140,10 @@ async def serve() -> None:
     downlink.add_subscribed_clients_changed(on_subscribed_changed)
 
     async def notify(message: dict) -> bool:
-        """发出消息，返回是否至少有一个订阅客户端收到了。"""
+        """发出消息，返回它是否被完整送达至少一个订阅客户端。"""
         data = encode(json.dumps(message, ensure_ascii=False))
         delivered = False
+        failed = False
         async with send_lock:
             # 取一份快照：发送途中订阅变化可能改写 notification_size，
             # 步长与切片长度必须用同一个值，否则会漏字节。
@@ -143,7 +153,6 @@ async def serve() -> None:
                 results = await downlink.notify_value_async(
                     to_buffer(data[i:i + size])
                 )
-                failed = False
                 for result in results:
                     if result.status != GattCommunicationStatus.SUCCESS:
                         logger.warning(
@@ -157,8 +166,26 @@ async def serve() -> None:
                         delivered = True
                 # 中间少了一片的字节流没法补救，继续发只会把对端带得更偏。
                 if failed:
-                    return delivered
-        return delivered
+                    return False
+        return delivered and not failed
+
+    async def bench_downlink() -> None:
+        """发一条 256 KB 的下行测速消息，再把发送耗时回报给手机。"""
+        started = time.perf_counter()
+        if not await notify({"t": "benchdata", "v": BENCH_PAYLOAD}):
+            logger.warning("下行测速未发出")
+            return
+        elapsed = time.perf_counter() - started
+        logger.info(
+            "下行测速：%d 字节 / %.1f 秒 = %.1f KB/s",
+            BENCH_BYTES, elapsed, BENCH_BYTES / elapsed / 1024,
+        )
+        await notify({
+            "t": "benchend",
+            "bytes": BENCH_BYTES,
+            "ms": round(elapsed * 1000),
+            "chunk": notification_size,
+        })
 
     async def heartbeat_loop() -> None:
         alive = None
@@ -196,6 +223,11 @@ async def serve() -> None:
             else:
                 logger.info("拉取系统剪贴板 %d 字", len(text))
                 await notify({"t": "clip", "v": text})
+        elif kind == "benchup":
+            # 测速载荷没有业务含义，只记一行大小，避免把 256 KB 打进日志。
+            logger.info("上行测速：收到 %d 字节", len(message.get("v", "")))
+        elif kind == "benchdown":
+            await bench_downlink()
         elif kind == "ping":
             await notify({"t": "pong"})
         elif kind == "log":

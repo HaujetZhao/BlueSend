@@ -291,3 +291,28 @@ textarea:focus {
   background: rgba(99, 102, 241, 0.2);
   border-color: rgba(99, 102, 241, 0.4);
 }
+
+/* 测速按钮组：调试用，视觉上比日常操作更弱 */
+.bench-group {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.btn-bench {
+  padding: 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.btn-bench:hover:not(:disabled) {
+  color: var(--text-color);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.btn-bench:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
