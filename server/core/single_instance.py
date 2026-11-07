@@ -26,3 +26,14 @@ def acquire(name: str) -> bool:
         return False
     _handle = handle
     return True
+
+
+def release() -> None:
+    """主动释放锁。
+
+    重启时先关句柄再拉起新进程，否则新进程会撞上这个还活着的旧进程。
+    """
+    global _handle
+    if _handle is not None:
+        _handle.Close()
+        _handle = None

@@ -2,16 +2,43 @@
 
 import asyncio
 import logging
+import subprocess
 import sys
+
+from rich.console import Console
 
 from core.logging_setup import setup_logging
 from core.paths import APP_DIR, FROZEN
 from core.server import serve
 from core.single_instance import acquire as acquire_instance_lock
+from core.single_instance import release as release_instance_lock
 
 logger = logging.getLogger("ble")
 
 INSTANCE_LOCK_NAME = "BlueSend.GattServer"
+
+
+def print_banner() -> None:
+    console = Console()
+    console.print()
+    console.rule("[bold #4f7cff]BlueSend 电脑端[/]")
+    console.print()
+    console.print(
+        "手机浏览器打开：[cyan underline]https://haujetzhao.github.io/BlueSend/[/]"
+    )
+    console.print()
+    console.print("  1. 点左上角的连接状态药丸，选中本机")
+    console.print("  2. 同一页面只开一个标签页，多开会互抢设备")
+    console.print()
+    console.print(f"日志目录：[cyan underline]{APP_DIR / 'logs'}[/]")
+    console.print()
+
+
+def launch_command() -> list[str]:
+    """重启时用的命令行。冻结后 argv[0] 就是 exe 本身，不能再传一遍。"""
+    if FROZEN:
+        return [sys.executable, *sys.argv[1:]]
+    return [sys.executable, *sys.argv]
 
 
 def main() -> None:
@@ -27,9 +54,19 @@ def main() -> None:
             f"'{pattern}'\" | Select-Object ProcessId,CommandLine"
         )
         sys.exit(1)
+    print_banner()
+
+    restart = False
     try:
-        asyncio.run(serve())
+        restart = asyncio.run(serve())
     except KeyboardInterrupt:
+        pass
+
+    if restart:
+        logger.info("重启程序")
+        release_instance_lock()
+        subprocess.Popen(launch_command())
+    else:
         logger.info("退出")
 
 

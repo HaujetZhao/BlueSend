@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import time
+from contextlib import suppress
 
 import keyboard
 from winrt.windows.devices.bluetooth import BluetoothError
@@ -31,6 +32,7 @@ from .protocol import (
     downlink_chunk_size,
 )
 from .text_input import type_text
+from .tray import Tray
 from .upload_server import start_upload_server
 
 logger = logging.getLogger("ble")
@@ -45,7 +47,8 @@ def to_buffer(data: bytes):
     return writer.detach_buffer()
 
 
-async def serve() -> None:
+async def serve() -> bool:
+    """启动服务并阻塞到退出请求。返回值表示是否请求重启。"""
     decoder = Decoder()
     wm_char_apps = load_wm_char_apps()
 
@@ -92,6 +95,29 @@ async def serve() -> None:
     logger.info("文件上传入口：%s", "、".join(uploads.urls()) or "没有可用的局域网地址")
 
     loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+    restart_requested = False
+
+    def request_stop(restart: bool) -> None:
+        """托盘线程调用：把退出请求投递回 asyncio 线程。"""
+
+        def apply() -> None:
+            nonlocal restart_requested
+            restart_requested = restart
+            stop_event.set()
+
+        try:
+            loop.call_soon_threadsafe(apply)
+        except RuntimeError:
+            # 事件循环已经关闭：退出流程正在收尾，忽略这次点击。
+            pass
+
+    tray = Tray(
+        on_exit=lambda: request_stop(restart=False),
+        on_restart=lambda: request_stop(restart=True),
+        upload_urls=uploads.urls,
+    )
+
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
     send_lock = asyncio.Lock()
     notification_size = FALLBACK_NOTIFICATION_SIZE
@@ -330,10 +356,20 @@ async def serve() -> None:
     provider.start_advertising(advertising)
 
     heartbeat = asyncio.create_task(heartbeat_loop())
+    tray.start()
     try:
-        await read_loop()
+        # 读循环永远不会自己结束，用退出事件与它竞速：谁先完成就收谁。
+        reader = asyncio.create_task(read_loop())
+        stopper = asyncio.create_task(stop_event.wait())
+        await asyncio.wait({reader, stopper}, return_when=asyncio.FIRST_COMPLETED)
+        reader.cancel()
+        with suppress(asyncio.CancelledError):
+            await reader
+        stopper.cancel()
     finally:
+        tray.stop()
         heartbeat.cancel()
         provider.stop_advertising()
         uploads.stop()
         logger.info("停止广播")
+    return restart_requested

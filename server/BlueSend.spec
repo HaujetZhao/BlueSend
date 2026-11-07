@@ -11,6 +11,7 @@
     ├── BlueSend.exe
     ├── internal/   第三方依赖与 Python 运行时
     ├── core/       Python 源文件（含 config.toml、upload_page.html）
+    ├── assets/     托盘图标
     └── logs/       首次运行生成
 
 core/ 不进 PYZ，打包后仍是可编辑的源文件：改配置或代码后重启 exe 即生效，
@@ -120,5 +121,13 @@ shutil.copytree(
     ROOT / "core",
     Path(DISTPATH) / APP_NAME / "core",
     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    dirs_exist_ok=True,
+)
+
+# 托盘运行期按 APP_DIR/assets/icon.ico 读图标；exe 图标虽然嵌进去了，
+# 托盘仍需要一份可读的文件。
+shutil.copytree(
+    ROOT / "assets",
+    Path(DISTPATH) / APP_NAME / "assets",
     dirs_exist_ok=True,
 )
