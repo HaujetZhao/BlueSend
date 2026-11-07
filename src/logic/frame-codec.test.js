@@ -34,3 +34,30 @@ test('中文按 UTF-8 字节计长度', () => {
 test('空对象', () => {
   assert.deepEqual(new FrameDecoder().push(encodeFrame({})), [{}]);
 });
+
+test('与电脑端 frame_codec.py 的字节契约', () => {
+  // JSON.stringify({ t: 'hb' }) 是 10 字节：{"t":"hb"}
+  assert.deepEqual(
+    Array.from(encodeFrame({ t: 'hb' })),
+    [0, 0, 0, 10, 123, 34, 116, 34, 58, 34, 104, 98, 34, 125],
+  );
+});
+
+test('长度字段跨多个字节', () => {
+  // 载荷体 300 字节，4 字节大端长度应为 00 00 01 2C
+  const payload = { t: 'text', v: 'a'.repeat(281) };
+  const frame = encodeFrame(payload);
+  assert.deepEqual(Array.from(frame.subarray(0, 4)), [0, 0, 1, 44]);
+  assert.deepEqual(new FrameDecoder().push(frame), [payload]);
+});
+
+test('分片边界落在 UTF-8 多字节字符中间', () => {
+  const payload = { t: 'text', v: '你好' };
+  const frame = encodeFrame(payload);
+  const body = new TextEncoder().encode(JSON.stringify(payload));
+  const firstMultiByte = body.findIndex((byte) => byte >= 0x80);
+  const cut = 4 + firstMultiByte + 1;
+  const decoder = new FrameDecoder();
+  assert.deepEqual(decoder.push(frame.subarray(0, cut)), []);
+  assert.deepEqual(decoder.push(frame.subarray(cut)), [payload]);
+});

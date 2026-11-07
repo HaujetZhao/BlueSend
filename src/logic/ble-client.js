@@ -22,6 +22,8 @@ export class BleClient {
   #dropCount = 0;
   #reconnectFailures = 0;
   #pendingLogs = [];
+  #connecting = null;
+  #generation = 0;
   #disposed = false;
 
   constructor({ onState, onEvent, onClipboard }) {
@@ -29,10 +31,6 @@ export class BleClient {
     this.#onEvent = onEvent;
     this.#onClipboard = onClipboard;
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
-  }
-
-  get connected() {
-    return this.#characteristic !== null;
   }
 
   note(text) {
@@ -45,34 +43,45 @@ export class BleClient {
       return;
     }
     this.#stopReconnect();
-    this.#device = null;
     this.#onState('connecting');
     try {
-      this.#device = await navigator.bluetooth.requestDevice({
+      const device = await navigator.bluetooth.requestDevice({
         filters: [{ services: [SERVICE_UUID] }],
         optionalServices: [SERVICE_UUID],
       });
-      this.#device.addEventListener('gattserverdisconnected', () =>
-        this.#handleDrop('物理断开'),
-      );
+      this.#teardownLink();
+      this.#device = device;
+      device.addEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
       await this.connect();
     } catch (err) {
       console.warn('选择设备失败', err);
-      this.#onState('disconnected');
+      // 取消选择时旧链路还活着，恢复到已连接状态。
+      this.#onState(this.#characteristic ? 'connected' : 'disconnected');
     }
   }
 
-  async connect() {
+  connect() {
+    if (this.#connecting) return this.#connecting;
+    const attempt = this.#doConnect();
+    const tracked = attempt.finally(() => {
+      if (this.#connecting === tracked) this.#connecting = null;
+    });
+    this.#connecting = tracked;
+    return tracked;
+  }
+
+  async #doConnect() {
+    const generation = this.#generation;
     try {
       this.#onState('connecting');
       const server = await this.#device.gatt.connect();
       const service = await server.getPrimaryService(SERVICE_UUID);
-      this.#characteristic = await service.getCharacteristic(CHAR_UUID);
-      await this.#characteristic.startNotifications();
-      this.#characteristic.addEventListener(
-        'characteristicvaluechanged',
-        this.#onNotify,
-      );
+      const characteristic = await service.getCharacteristic(CHAR_UUID);
+      if (generation !== this.#generation || this.#disposed) return;
+      this.#characteristic = characteristic;
+      await characteristic.startNotifications();
+      if (generation !== this.#generation || this.#disposed) return;
+      characteristic.addEventListener('characteristicvaluechanged', this.#onNotify);
       this.#decoder.reset();
       this.#writeChain = Promise.resolve();
       this.#noteAlive();
@@ -82,6 +91,7 @@ export class BleClient {
       this.#flushPendingLogs();
       this.#onState('connected');
     } catch (err) {
+      if (generation !== this.#generation || this.#disposed) return;
       console.warn('连接失败', err);
       this.#characteristic = null;
       this.#onState('disconnected');
@@ -90,10 +100,11 @@ export class BleClient {
   }
 
   send(message) {
-    if (!this.#characteristic) return false;
+    const characteristic = this.#characteristic;
+    if (!characteristic) return false;
     const frame = encodeFrame(message);
     this.#writeChain = this.#writeChain
-      .then(() => this.#writeFrame(frame))
+      .then(() => this.#writeFrame(characteristic, frame))
       .catch((err) => {
         console.error('发送失败', message.t, err);
         this.#handleDrop('写入失败：' + err.message);
@@ -105,10 +116,21 @@ export class BleClient {
     this.#disposed = true;
     document.removeEventListener('visibilitychange', this.#onVisibilityChange);
     this.#stopReconnect();
+    this.#teardownLink();
+  }
+
+  #teardownLink() {
+    this.#generation += 1;
+    this.#connecting = null;
     clearTimeout(this.#heartbeatTimer);
-    this.#device?.gatt?.disconnect();
+    this.#heartbeatTimer = null;
+    const device = this.#device;
     this.#device = null;
     this.#characteristic = null;
+    this.#decoder.reset();
+    this.#writeChain = Promise.resolve();
+    device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
+    device?.gatt?.disconnect();
   }
 
   #note(text) {
@@ -127,13 +149,17 @@ export class BleClient {
     }
   }
 
-  async #writeFrame(frame) {
-    const size = this.#characteristic.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
+  async #writeFrame(characteristic, frame) {
+    const size = characteristic.maxWriteWithResponseSize || FALLBACK_WRITE_CHUNK;
     for (let i = 0; i < frame.length; i += size) {
+      // 链路已经换了或断了，旧队列里的分片不再写。
+      if (characteristic !== this.#characteristic) return;
       // 有响应写由 ATT 保证先后顺序，这正是无响应写分片乱序的根源。
-      await this.#characteristic.writeValueWithResponse(frame.subarray(i, i + size));
+      await characteristic.writeValueWithResponse(frame.subarray(i, i + size));
     }
   }
+
+  #onDeviceDisconnect = () => this.#handleDrop('物理断开');
 
   #onNotify = (event) => {
     const view = event.target.value;
@@ -184,27 +210,29 @@ export class BleClient {
 
   #scheduleReconnect() {
     if (!this.#device || this.#reconnectTimer) return;
-    this.#reconnectTimer = setInterval(() => {
-      if (!this.#device) {
-        this.#stopReconnect();
-        return;
-      }
-      this.connect()
-        .then(() => {
-          this.#reconnectFailures = 0;
-        })
-        .catch((err) => {
-          this.#reconnectFailures += 1;
-          // 每 2 秒试一次，全记会刷屏，只记第一次和之后每 10 次。
-          if (this.#reconnectFailures === 1 || this.#reconnectFailures % 10 === 0) {
-            this.#note(`重连失败 ${this.#reconnectFailures} 次：${err.message}`);
-          }
-        });
+    this.#reconnectTimer = setTimeout(() => {
+      this.#reconnectTimer = null;
+      this.#attemptReconnect();
     }, RECONNECT_INTERVAL_MS);
   }
 
+  async #attemptReconnect() {
+    if (!this.#device) return;
+    try {
+      await this.connect();
+      this.#reconnectFailures = 0;
+    } catch (err) {
+      this.#reconnectFailures += 1;
+      // 每 2 秒试一次，全记会刷屏，只记第一次和之后每 10 次。
+      if (this.#reconnectFailures === 1 || this.#reconnectFailures % 10 === 0) {
+        this.#note(`重连失败 ${this.#reconnectFailures} 次：${err.message}`);
+      }
+      this.#scheduleReconnect();
+    }
+  }
+
   #stopReconnect() {
-    clearInterval(this.#reconnectTimer);
+    clearTimeout(this.#reconnectTimer);
     this.#reconnectTimer = null;
   }
 
