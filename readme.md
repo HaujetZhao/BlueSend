@@ -30,7 +30,7 @@ npm install
 
 ```powershell
 cd pc
-uv run python server.py
+uv run python main.py
 ```
 
 看到「广播状态：Started」就已经在等手机连接了。
@@ -84,7 +84,7 @@ npm run build      # 单文件产物 dist/index.html，交给任意 HTTPS 托管
 npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
 
-改协议时，`protocol.md`、`pc/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
+改协议时，`protocol.md`、`pc/bluetooth_input/server.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
 ## 发布
 

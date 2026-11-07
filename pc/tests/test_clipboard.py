@@ -1,6 +1,6 @@
 import pytest
 
-import clipboard
+from bluetooth_input import clipboard
 
 
 def _open_error(*_args):

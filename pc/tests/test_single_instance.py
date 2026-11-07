@@ -3,7 +3,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from single_instance import acquire
+from bluetooth_input.single_instance import acquire
 
 PC_DIR = Path(__file__).resolve().parents[1]
 
@@ -19,7 +19,7 @@ def test_other_process_is_refused():
     assert acquire(name)
     code = (
         "import sys\n"
-        "from single_instance import acquire\n"
+        "from bluetooth_input.single_instance import acquire\n"
         "sys.exit(0 if acquire(sys.argv[1]) else 1)\n"
     )
     result = subprocess.run(

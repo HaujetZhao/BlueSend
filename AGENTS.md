@@ -45,15 +45,17 @@ E:\repos\Bluetooth-Input\
 │   ├── certs\{cert,key}.pem    自签证书，dev server 用
 │   └── vite.config{,.pwa}.js   三套构建配置
 ├── pc\                         电脑端
-│   ├── server.py               GATT Server 主程序
-│   ├── logging_setup.py        日志配置（控制台 rich 上色，文件精确到毫秒）
-│   ├── single_instance.py      单实例锁（Windows 命名互斥体）
-│   ├── protocol.py             UUID 与下行分片上限
-│   ├── frame_codec.py          4 字节长度前缀帧编解码
-│   ├── clipboard.py            Win32 剪贴板读写
-│   ├── text_input.py           上屏：默认 SendInput，兼容名单改投 WM_CHAR
-│   ├── config.py               config.toml 读取
-│   ├── config.toml             上屏兼容名单
+│   ├── main.py                 入口：日志、单实例锁、启动
+│   ├── bluetooth_input\        电脑端包
+│   │   ├── server.py           GATT Server 主程序
+│   │   ├── logging_setup.py    日志配置（控制台 rich 上色，文件精确到毫秒）
+│   │   ├── single_instance.py  单实例锁（Windows 命名互斥体）
+│   │   ├── protocol.py         UUID 与下行分片上限
+│   │   ├── frame_codec.py      4 字节长度前缀帧编解码
+│   │   ├── clipboard.py        Win32 剪贴板读写
+│   │   ├── text_input.py       上屏：默认 SendInput，兼容名单改投 WM_CHAR
+│   │   ├── config.py           config.toml 读取
+│   │   └── config.toml         上屏兼容名单
 │   ├── tests\                  pytest
 │   └── logs\                   服务端日志（gitignore）
 ├── docs\superpowers\           历史设计与计划文档（保留原貌）
@@ -72,7 +74,7 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object Proc
 
 ```powershell
 cd E:\repos\Bluetooth-Input\pc
-uv run python server.py
+uv run python main.py
 ```
 
 看到 `广播状态：2`（Started）就是在等手机连接。日志同时写 `pc/logs/ble-<时间戳>.log`，网页端日志也会通过 `log` 消息打进来。每次启动建一个日志文件，启动时只保留最近 30 个，更旧的自动清理。
@@ -107,7 +109,7 @@ npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 - 网页对每次带响应写加 2 秒上限（`WRITE_ACK_TIMEOUT_MS`）；超时即认定链路不可用，主动断开重连，不补发（见坑 12）。
 - 重连期间网页把消息压进有界待发队列（100 条），宣布连接后按顺序补发；溢出丢最旧的一条。这只针对还没交给写链的消息，和「不做应用层重传」不冲突。
 - 电脑读不到剪贴板（被占用）时发 `notice` 而不是空 `clip`，避免清空手机端剪贴板。
-- 改协议时 `protocol.md`、`pc/server.py`、`pc/protocol.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
+- 改协议时 `protocol.md`、`pc/bluetooth_input/server.py`、`pc/bluetooth_input/protocol.py`、`web/src/logic/protocol.js`、`web/src/logic/frame-codec.js` 必须同步。
 
 ## 六、已知约束与踩过的坑
 
@@ -154,11 +156,11 @@ Windows 继续在链路层维持连接，浏览器 `gattserverdisconnected` 永�
 
 原生 App 时代的坑。网页侧现在靠「断开即重连 + `writeChain` 串行化 + 重连前清空接收缓冲」规避。
 
-### 8. 多个 `server.py` 进程同时跑会抢广播
+### 8. 多个 `main.py` 进程同时跑会抢广播
 
 `uv run` 外面包了一层，停后台任务只杀到包装进程，真正的 python 子进程还活着。两个进程用同一个 Service UUID 各自注册、各自广播，症状是 `GATT Error Unknown`、刚连就断。
 
-BLE 接口本身给不出「这个 Service UUID 已被占用」的信号：实测两个进程各自 `create_async` 都返回 `error: 0`，广播状态也各说各话，唯一的痕迹是互相把对方的广播挤成 3（Aborted）再恢复 2。`BluetoothLEAdvertisementWatcher` 也不行——本机适配器收不到自己发出的广播（监听 6 秒收到 44 个包，来自本机地址的 0 个，而当时广播状态是 Started），WinRT 也没有枚举本机 GATT 注册的接口。所以走进程层——启动时先抢命名互斥体 `BluetoothInput.GattServer`，抢不到就打印提示并退出，不碰 BLE（`pc/single_instance.py`）。互斥体随进程退出由系统释放，不会留僵尸锁。
+BLE 接口本身给不出「这个 Service UUID 已被占用」的信号：实测两个进程各自 `create_async` 都返回 `error: 0`，广播状态也各说各话，唯一的痕迹是互相把对方的广播挤成 3（Aborted）再恢复 2。`BluetoothLEAdvertisementWatcher` 也不行——本机适配器收不到自己发出的广播（监听 6 秒收到 44 个包，来自本机地址的 0 个，而当时广播状态是 Started），WinRT 也没有枚举本机 GATT 注册的接口。所以走进程层——启动时先抢命名互斥体 `BluetoothInput.GattServer`，抢不到就打印提示并退出，不碰 BLE（`pc/bluetooth_input/single_instance.py`）。互斥体随进程退出由系统释放，不会留僵尸锁。
 
 它只识别同样带这把锁的实例；`E:\repos\ble` 里的旧副本和其他程序不受约束，那种情况仍要按第四节的命令人工查。
 
@@ -174,7 +176,7 @@ Windows 报给 `GattSubscribedClient.max_notification_size` 的是 MTU-3，实�
 
 症状：长剪贴板消息的整分片全被丢掉，只有末尾那个小于 512 字节的短分片能到手机，长度前缀解码器永远拼不完整；后续心跳也被吞，9 秒看门狗判死重连。短消息（小于 512 字节）不受影响。
 
-修法：下行分片夹到 512，即 `min(GattSubscribedClient.max_notification_size, 512)`，代码在 `pc/protocol.py` 的 `downlink_chunk_size`。
+修法：下行分片夹到 512，即 `min(GattSubscribedClient.max_notification_size, 512)`，代码在 `pc/bluetooth_input/protocol.py` 的 `downlink_chunk_size`。
 
 ### 11. 电脑端重启后网页自动重连无法真正恢复
 
@@ -201,7 +203,7 @@ Chrome 把 GATT 服务/特征值句柄和通知注册状态缓存到页面生命
 
 `text` 消息默认用 `keyboard.write`（SendInput + `KEYEVENTF_UNICODE`）。焦点应用挂着中文输入法时，全角中文标点后的 `KEYUP` 会被输入法吞掉，Qt5 应用（微信、Telegram）按错乱的输入法状态提交，表现为标点后第一个字被替换成同一个标点。原生控件（记事本）、CMD、PowerShell、Windows Terminal 不受影响。
 
-修法：`pc/config.toml` 的 `wm_char_apps` 列出进程名（`Weixin.exe`、`Telegram.exe`），命中的改投 `WM_CHAR`（`pc/text_input.py`）。不能全局替换——Windows Terminal 收不到 `WM_CHAR`。完整复现与证据见 [docs/ime-typing-bug.md](docs/ime-typing-bug.md)。
+修法：`pc/bluetooth_input/config.toml` 的 `wm_char_apps` 列出进程名（`Weixin.exe`、`Telegram.exe`），命中的改投 `WM_CHAR`（`pc/bluetooth_input/text_input.py`）。不能全局替换——Windows Terminal 收不到 `WM_CHAR`。完整复现与证据见 [docs/ime-typing-bug.md](docs/ime-typing-bug.md)。
 
 ## 七、当前状态与已知限制
 

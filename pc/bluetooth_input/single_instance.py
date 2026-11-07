@@ -1,6 +1,6 @@
 """单实例锁：Windows 命名互斥体。
 
-两个 server.py 同时跑时，BLE 层不会报任何错：各自注册同一个 Service UUID、
+两个 main.py 同时跑时，BLE 层不会报任何错：各自注册同一个 Service UUID、
 各自广播，然后互相把对方的广播挤掉（见 AGENTS.md 坑 8）。所以在创建服务
 之前先抢一个命名互斥体，抢不到就直接退出。
 

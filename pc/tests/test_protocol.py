@@ -1,4 +1,4 @@
-from protocol import DOWNLINK_CHUNK_LIMIT, downlink_chunk_size
+from bluetooth_input.protocol import DOWNLINK_CHUNK_LIMIT, downlink_chunk_size
 
 
 def test_android_gatt_limit_is_clamped():

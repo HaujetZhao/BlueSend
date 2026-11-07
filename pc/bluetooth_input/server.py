@@ -3,8 +3,6 @@
 import asyncio
 import json
 import logging
-import sys
-from pathlib import Path
 
 import keyboard
 from winrt.windows.devices.bluetooth import BluetoothError
@@ -19,17 +17,14 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
 )
 from winrt.windows.storage.streams import DataWriter
 
-from clipboard import get_clipboard_text, set_clipboard_text
-from frame_codec import Decoder, FrameError, encode
-from logging_setup import setup_logging
-from config import load_wm_char_apps
-from protocol import DOWNLINK_UUID, SERVICE_UUID, UPLINK_UUID, downlink_chunk_size
-from single_instance import acquire as acquire_instance_lock
-from text_input import type_text
+from .clipboard import get_clipboard_text, set_clipboard_text
+from .config import load_wm_char_apps
+from .frame_codec import Decoder, FrameError, encode
+from .protocol import DOWNLINK_UUID, SERVICE_UUID, UPLINK_UUID, downlink_chunk_size
+from .text_input import type_text
 
 logger = logging.getLogger("ble")
 
-INSTANCE_LOCK_NAME = "BluetoothInput.GattServer"
 HEARTBEAT_SECONDS = 3
 FALLBACK_NOTIFICATION_SIZE = 20
 
@@ -40,7 +35,7 @@ def to_buffer(data: bytes):
     return writer.detach_buffer()
 
 
-async def main() -> None:
+async def serve() -> None:
     decoder = Decoder()
     wm_char_apps = load_wm_char_apps()
 
@@ -245,20 +240,3 @@ async def main() -> None:
         heartbeat.cancel()
         provider.stop_advertising()
         logger.info("停止广播")
-
-
-if __name__ == "__main__":
-    setup_logging(Path(__file__).parent / "logs")
-    # 多实例会各自注册同一个 Service UUID、互相挤掉广播，症状极难认（坑 8），
-    # 所以抢不到锁就先退出，别去碰 BLE。
-    if not acquire_instance_lock(INSTANCE_LOCK_NAME):
-        logger.error("已有另一个 server.py 在运行，本进程退出。")
-        logger.error(
-            '查看现存实例：Get-CimInstance Win32_Process -Filter "Name like '
-            "'python%'\" | Select-Object ProcessId,CommandLine"
-        )
-        sys.exit(1)
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("退出")

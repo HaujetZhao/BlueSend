@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from frame_codec import MAX_FRAME_BYTES, Decoder, FrameError, encode
+from bluetooth_input.frame_codec import MAX_FRAME_BYTES, Decoder, FrameError, encode
 
 
 def test_encode_prefixes_length():

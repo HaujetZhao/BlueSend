@@ -2,7 +2,7 @@ import logging
 import os
 import re
 
-from logging_setup import MillisecondFormatter, prune_logs
+from bluetooth_input.logging_setup import MillisecondFormatter, prune_logs
 
 
 def test_file_time_has_milliseconds_and_no_date():

@@ -1,4 +1,4 @@
-import config
+from bluetooth_input import config
 
 
 def test_wm_char_apps_are_lowercased(monkeypatch, tmp_path):

@@ -13,7 +13,7 @@
 
 ## 复现方法
 
-1. 电脑端启动 `pc/server.py`，手机网页连上。
+1. 电脑端启动 `pc/main.py`，手机网页连上。
 2. 焦点放在微信聊天框或 Telegram 搜索框（系统输入法为微软五笔）。
 3. 发送 `测试，你好。世界`，观察落字。
 
@@ -30,7 +30,7 @@
 
 ## 根因
 
-`pc/server.py` 的 `text` 分支原来用 `keyboard.write`。Windows 上它把每个字符作为 `SendInput` + `KEYEVENTF_UNICODE`（VK_PACKET）的一对「按下 / 抬起」事件注入。
+`pc/bluetooth_input/server.py` 的 `text` 分支原来用 `keyboard.write`。Windows 上它把每个字符作为 `SendInput` + `KEYEVENTF_UNICODE`（VK_PACKET）的一对「按下 / 抬起」事件注入。
 
 用 PyQt5（同为 Qt 5.15）自建窗口并挂上微软五笔，抓到的消息流如下：
 
@@ -52,7 +52,7 @@ KEYDOWN 0xe7  CHAR 0x597d '好'  KEYUP 0xe7
 
 ## 修复：默认 SendInput，兼容名单改用 WM_CHAR
 
-两种上屏方式并存，由 `pc/config.toml` 的前台进程名决定：
+两种上屏方式并存，由 `pc/bluetooth_input/config.toml` 的前台进程名决定：
 
 ```toml
 wm_char_apps = ["Weixin.exe", "Telegram.exe"]
@@ -61,7 +61,7 @@ wm_char_apps = ["Weixin.exe", "Telegram.exe"]
 - **默认**：`keyboard.write`（SendInput）。CMD、PowerShell、Windows Terminal、记事本、浏览器等都用这条。
 - **命中名单**（不区分大小写）：向焦点窗口直接投递 `WM_CHAR`，绕开输入法与键盘事件队列。
 
-`pc/text_input.py` 的实现：
+`pc/bluetooth_input/text_input.py` 的实现：
 
 - 前台进程名：`win32gui.GetForegroundWindow` → `win32process.GetWindowThreadProcessId` → `psutil.Process(pid).name()`。
 - 焦点窗口：`GetGUIThreadInfo` 的 `hwndFocus`，回落前台窗口（pywin32 没封装这个 API，仍用 ctypes 调用）。Qt 窗口没有原生子控件，`hwndFocus` 就是顶层窗口本身。
@@ -69,7 +69,7 @@ wm_char_apps = ["Weixin.exe", "Telegram.exe"]
 - `\n`、`\b` 仍用 `keyboard.send("enter" / "backspace")`，保持原来的 `keyboard.write` 语义。
 - `key` 消息（enter / backspace）不变，继续走 `keyboard.send`。
 
-改完 `config.toml` 需要重启 `server.py` 生效。
+改完 `config.toml` 需要重启 `main.py` 生效。
 
 ### 验证记录
 
