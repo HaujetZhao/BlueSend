@@ -12,15 +12,9 @@ const https = {
   key: fs.readFileSync(path.join(root, 'certs/key.pem')),
   cert: fs.readFileSync(path.join(root, 'certs/cert.pem')),
 };
-const version = JSON.parse(
-  fs.readFileSync(path.join(root, 'package.json'), 'utf-8'),
-).version;
-
 export default defineConfig({
   plugins: [vue(), viteSingleFile()],
   base: './',
-  // 页面版本随电脑端下发的一起参与比对，来源只有 package.json 一处。
-  define: { __APP_VERSION__: JSON.stringify(version) },
   resolve: {
     alias: {
       // dev 与单文件构建没有 service worker，指向桩，避免解析 PWA 虚拟模块。

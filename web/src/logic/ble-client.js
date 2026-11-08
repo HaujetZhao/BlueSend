@@ -9,7 +9,6 @@ import {
   PROTOCOL_VERSION,
 } from './protocol.js';
 import { encodeFrame, FrameDecoder } from './frame-codec.js';
-import { APP_VERSION } from './version.js';
 
 // 写入的 Promise 可能一直挂着（带响应写等不到应答、无响应写在缓冲满时排队），
 // 所以加一道上限；超时后调用方会主动断开链路。超时值可按消息大小放宽。
@@ -35,6 +34,8 @@ const OUTBOX_LIMIT = 100;
 export class BleClient {
   #onState;
   #onEvent;
+  // 持久警告（如协议不兼容）：普通事件会不断覆盖事件行，这类提示不能被顶掉。
+  #onWarning;
   #onClipboard;
   #onBench;
   #onReceiveProgress;
@@ -71,9 +72,10 @@ export class BleClient {
   // 刚收到的下行测速载荷，留着给随后的 benchend 做内容校验。
   #benchPayload = '';
 
-  constructor({ onState, onEvent, onClipboard, onBench, onReceiveProgress, onNet }) {
+  constructor({ onState, onEvent, onWarning, onClipboard, onBench, onReceiveProgress, onNet }) {
     this.#onState = onState;
     this.#onEvent = onEvent;
+    this.#onWarning = onWarning ?? (() => {});
     this.#onClipboard = onClipboard;
     this.#onBench = onBench;
     this.#onReceiveProgress = onReceiveProgress;
@@ -127,6 +129,7 @@ export class BleClient {
 
   async #doConnect() {
     const generation = this.#generation;
+    this.#onWarning('');
     try {
       const server = await this.#device.gatt.connect();
       const service = await server.getPrimaryService(SERVICE_UUID);
@@ -360,9 +363,10 @@ export class BleClient {
         // 按 1 处理——0.3.0 就是当前协议，不该误报。
         const proto = message.proto ?? 1;
         if (proto !== PROTOCOL_VERSION) {
-          this.#emit(
-            `协议不兼容：电脑端 v${message.version}（协议 v${proto}），` +
-              `网页 v${APP_VERSION}（协议 v${PROTOCOL_VERSION}），请刷新网页或更新电脑端`,
+          // 在线版页面始终从 GitHub Pages 拉最新的，所以不兼容时该升级的
+          // 一定是电脑端。
+          this.#onWarning(
+            `网页协议 v${PROTOCOL_VERSION}，电脑端协议 v${proto}，请更新电脑端。`,
           );
         }
         break;
@@ -391,6 +395,7 @@ export class BleClient {
   #handleDrop = (reason) => {
     if (this.#disposed || !this.#link) return;
     this.#generation += 1;
+    this.#onWarning('');
     const lasted = this.#connectedAt
       ? ((Date.now() - this.#connectedAt) / 1000).toFixed(1)
       : '未知';

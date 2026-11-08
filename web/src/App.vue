@@ -26,6 +26,7 @@ let uploadGeneration = 0;
 const {
   status,
   lastEvent,
+  warning,
   connected,
   connect: connectBle,
   send,
@@ -74,8 +75,20 @@ watch(status, (state) => {
     benching.value = false;
     return;
   }
+  // 版本不兼容时弹窗会打断操作，别先把焦点抢到输入框、把键盘顶起来。
+  if (warning.value) return;
   focusInput();
 });
+
+watch(warning, (text) => {
+  if (!text) return;
+  // 弹窗出现时收起键盘；不然遮罩挡着，输入框还占着键盘。
+  inputEl.value?.blur();
+});
+
+function dismissWarning() {
+  warning.value = '';
+}
 
 function connect() {
   if (!navigator.bluetooth) {
@@ -555,6 +568,16 @@ onUnmounted(() => tabChannel.close());
       >
         有新版本，点击刷新
       </button>
+    </div>
+  </div>
+
+  <div v-if="warning" class="modal-mask" role="alertdialog" aria-modal="true">
+    <div class="modal">
+      <h2 class="modal-title">版本不兼容</h2>
+      <p class="modal-text">{{ warning }}</p>
+      <div class="modal-actions">
+        <button @click="dismissWarning">知道了</button>
+      </div>
     </div>
   </div>
 
