@@ -6,6 +6,7 @@ import {
   UPLINK_LIMIT_MIN,
   RECONNECT_INTERVAL_MS,
   WRITE_ACK_TIMEOUT_MS,
+  PROTOCOL_VERSION,
 } from './protocol.js';
 import { encodeFrame, FrameDecoder } from './frame-codec.js';
 import { APP_VERSION } from './version.js';
@@ -353,15 +354,19 @@ export class BleClient {
       case 'notice':
         this.#emit(message.v);
         break;
-      case 'hello':
-        // 电脑端每次订阅都会报一次版本。两端版本是独立发布的，不配套时
-        // 提示更新——协议破坏性变更后，旧页面和新电脑端根本连不通。
-        if (message.version !== APP_VERSION) {
+      case 'hello': {
+        // 应用版本只是显示信息，两端独立发版、应用版本不同也能正常互通；
+        // 只有协议版本不同才意味着线格式不兼容。旧电脑端没有 proto，
+        // 按 1 处理——0.3.0 就是当前协议，不该误报。
+        const proto = message.proto ?? 1;
+        if (proto !== PROTOCOL_VERSION) {
           this.#emit(
-            `版本不一致：电脑端 v${message.version}，网页 v${APP_VERSION}，请刷新网页或更新电脑端`,
+            `协议不兼容：电脑端 v${message.version}（协议 v${proto}），` +
+              `网页 v${APP_VERSION}（协议 v${PROTOCOL_VERSION}），请刷新网页或更新电脑端`,
           );
         }
         break;
+      }
       case 'benchend':
         this.#onBench({
           bytes: message.bytes,

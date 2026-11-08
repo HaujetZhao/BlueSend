@@ -4,6 +4,10 @@ import base64
 import secrets
 from uuid import UUID
 
+# 协议版本：帧格式、切片头、消息语义发生不兼容变化时两端同步 +1。
+# 手机端在 hello 里比对；应用版本号（pyproject.toml）只用于显示。
+PROTOCOL_VERSION = 1
+
 SERVICE_UUID = UUID("7d9f0001-3c4e-4b6a-9f2e-1a2b3c4d5e6f")
 # 上行：手机写入，电脑接收。
 UPLINK_UUID = UUID("7d9f0002-3c4e-4b6a-9f2e-1a2b3c4d5e6f")

@@ -1,7 +1,7 @@
 # 协议整理：版本语义分离与文档重排
 
 日期：2026-11-08
-状态：待实施
+状态：已实施
 
 ## 背景
 
@@ -23,7 +23,8 @@
 - `web/src/logic/ble-client.js`：按 `proto` 判断兼容性。
 - `protocol.md`：整体重排。
 - `AGENTS.md`：协议速查同步一句。
-- `server/pyproject.toml`、`web/package.json`、`web/package-lock.json`、`server/uv.lock`：版本升到 `0.3.1`（非破坏性变更）。
+
+应用版本保持 `0.3.0` 不变——尚未发布，不需要为这次改动单独升号。
 
 不改：
 
@@ -42,7 +43,7 @@
 ### hello 消息
 
 ```json
-{"t": "hello", "version": "0.3.1", "proto": 1}
+{"t": "hello", "version": "0.3.0", "proto": 1}
 ```
 
 - `version`：电脑端应用版本，字符串。

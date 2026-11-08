@@ -26,6 +26,7 @@ from .config import load_upload_folder, load_wm_char_apps
 from .frame_codec import Decoder, FrameError, UplinkAssembler, encode
 from .protocol import (
     DOWNLINK_UUID,
+    PROTOCOL_VERSION,
     SERVICE_UUID,
     UPLINK_UUID,
     bench_payload,
@@ -232,11 +233,15 @@ async def serve() -> bool:
             # 就整条连接按 20 字节切。
             on_max_notification_size_changed(client, None)
         if clients:
-            # 版本号是连接作用域的：手机端拿它和自己的版本比对，两端不配套
-            # 时提示更新。协议破坏性变更后，旧页面和新电脑端是连不上的。
+            # 版本信息是连接作用域的：手机端拿 proto 判断是否兼容，应用版本
+            # 只用于把「更新的哪一端」说清楚。协议破坏性变更后两端连不通。
             loop.call_soon_threadsafe(
                 lambda: asyncio.create_task(
-                    notify({"t": "hello", "version": app_version()})
+                    notify({
+                        "t": "hello",
+                        "version": app_version(),
+                        "proto": PROTOCOL_VERSION,
+                    })
                 )
             )
             # 上传入口是连接作用域的，每条连接都现算一次；之后的变化由
