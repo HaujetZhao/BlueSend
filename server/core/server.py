@@ -44,6 +44,10 @@ def format_upload_hosts(hosts: list[str]) -> str:
 
 
 HEARTBEAT_SECONDS = 3
+# 一条上行消息出现缺片后等多久放弃。手机端串行发送（前一条的最后一片等
+# ATT 应答才发下一条），正常情况片都在毫秒级到齐；大消息传输期间每来一片
+# 都会刷新时间戳，不会被误判。超时只丢这一条，后面的消息照常提交。
+UPLINK_MESSAGE_TIMEOUT_SECONDS = 5.0
 # 上传入口不是常驻不变的：电脑可能中途接入新的局域网（比如手机开了热点），
 # 地址会变，而 BLE 链路不受影响、不会再触发订阅事件。轮询发现变化后重发。
 NET_POLL_SECONDS = 3
@@ -127,11 +131,11 @@ async def serve() -> bool:
         upload_urls=uploads.urls,
     )
 
-    incoming: asyncio.Queue[bytes] = asyncio.Queue()
+    incoming: asyncio.Queue[bytes | None] = asyncio.Queue()
     send_lock = asyncio.Lock()
     notification_size = FALLBACK_NOTIFICATION_SIZE
-    # 上行分片先经重组（剥 4 字节序号、按序还原）再进解码队列：写回调跑在
-    # WinRT 线程池上，并发回调投递的字节顺序会颠倒。
+    # 上行分片先经重组（剥 4 字节片头、按消息 ID 分组）再进解码队列：写回调
+    # 跑在 WinRT 线程池上，并发回调投递的字节顺序会颠倒。
     assembler = UplinkAssembler(
         lambda data: loop.call_soon_threadsafe(incoming.put_nowait, data)
     )
@@ -202,13 +206,14 @@ async def serve() -> bool:
     def on_subscribed_changed(sender, args) -> None:
         clients = list(downlink.subscribed_clients)
         logger.info("订阅变化：当前 %d 个订阅客户端", len(clients))
-        # 订阅变化只发生在连接边界。上行字节流是连接作用域的，旧连接写了一半
-        # 的帧不能带进新连接，否则长度前缀会被读成任意值，解码器永久失步。
-        # 重组器同样按连接清零（自带锁，直接调即可）。
-        assembler.reset()
-        loop.call_soon_threadsafe(decoder.reset)
-        # 订阅清零，会话对象随之作废；下一轮订阅是全新对象，必须重新挂监听。
+        # 只有订阅清零才是连接边界（自带锁，直接调即可）。两个客户端时其中
+        # 一个退订也会触发这条事件，但活着的链路字节流没断、序号不会归零；
+        # 此时清零重组器会让它永远等一个不会再来的 0（2026-11-08 实测：
+        # 订阅 2→1 后所有按键石沉大海）。新连接的起点由「收到序号 0」识别。
         if not clients:
+            assembler.reset()
+            loop.call_soon_threadsafe(decoder.reset)
+            # 会话对象随之作废；下一轮订阅是全新对象，必须重新挂监听。
             watched.clear()
         for client in clients:
             # 去重键取 .id（字符串）。不能用 str(device_id)：pywinrt 没给
@@ -295,6 +300,9 @@ async def serve() -> bool:
         alive = None
         while True:
             await asyncio.sleep(HEARTBEAT_SECONDS)
+            # 缺片的消息在这里被清掉，后面的消息才能继续提交；否则一条消息
+            # 丢片就会把整条上行链路卡死到下次重连。
+            assembler.expire(UPLINK_MESSAGE_TIMEOUT_SECONDS)
             try:
                 delivered = await notify({"t": "hb"})
             except Exception:
@@ -364,8 +372,13 @@ async def serve() -> bool:
 
     async def read_loop() -> None:
         while True:
+            chunk = await incoming.get()
+            if chunk is None:
+                # 重组器发现新连接的字节流从 0 重新开始：旧连接的半帧作废。
+                decoder.reset()
+                continue
             try:
-                payloads = decoder.feed(await incoming.get())
+                payloads = decoder.feed(chunk)
             except FrameError as err:
                 # 字节流已经对不上帧格式，继续解析只会越错越远；丢掉缓冲，
                 # 等下一个连接边界重建（对端写失败也会断开重连）。

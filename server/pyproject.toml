@@ -1,6 +1,6 @@
 [project]
 name = "BlueSend-Server"
-version = "0.2.0"
+version = "0.3.0"
 requires-python = ">=3.12"
 dependencies = [
     "keyboard>=0.13.5",

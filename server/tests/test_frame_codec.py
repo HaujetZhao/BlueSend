@@ -74,48 +74,100 @@ def test_reset_recovers_from_half_frame():
     assert d.feed(encode("新连接")) == ["新连接"]
 
 
-def _chunk(seq: int, body: bytes) -> bytes:
-    return seq.to_bytes(4, "big") + body
+def _chunk(msg_id: int, frag: int, body: bytes) -> bytes:
+    return msg_id.to_bytes(2, "big") + frag.to_bytes(2, "big") + body
 
 
-def test_assembler_orders_swapped_chunks():
+def _fragments(msg_id: int, text: str, size: int = 512) -> list[bytes]:
+    """把一条消息切成真实格式的分片，片头带消息 ID 与片序号。"""
+    frame = encode(text)
+    return [
+        _chunk(msg_id, frag, frame[i:i + size])
+        for frag, i in enumerate(range(0, len(frame), size))
+    ]
+
+
+def test_message_reassembles_in_fragment_order():
     out = []
     a = UplinkAssembler(out.append)
-    # 回调线程并发投递：1 先到、0 补洞，还原后顺序不能反。
-    a.feed(_chunk(1, b"world"))
-    a.feed(_chunk(0, b"hello"))
-    a.feed(_chunk(2, b"!"))
-    assert out == [b"hello", b"world", b"!"]
+    frags = _fragments(0, "hello world", size=4)
+    # 回调线程并发投递：片序颠倒，还原后内容不能错位。
+    for f in (frags[1], frags[0], *frags[2:]):
+        a.feed(f)
+    assert out == [encode("hello world")]
 
 
-def test_assembler_holds_gap_until_filled():
+def test_messages_commit_in_id_order():
     out = []
     a = UplinkAssembler(out.append)
-    a.feed(_chunk(0, b"a"))
-    a.feed(_chunk(2, b"c"))
-    assert out == [b"a"]
-    a.feed(_chunk(1, b"b"))
-    assert out == [b"a", b"b", b"c"]
+    # 后一条先收齐也要等前一条：上屏顺序不能乱。
+    for f in _fragments(1, "second"):
+        a.feed(f)
+    assert out == []
+    for f in _fragments(0, "first"):
+        a.feed(f)
+    assert out == [encode("first"), encode("second")]
 
 
-def test_assembler_drops_duplicate():
+def test_expire_drops_message_with_missing_fragment():
     out = []
     a = UplinkAssembler(out.append)
-    a.feed(_chunk(0, b"a"))
-    a.feed(_chunk(0, b"a"))
-    assert out == [b"a"]
+    frags = _fragments(0, "x" * 20, size=4)
+    a.feed(frags[0])
+    a.feed(frags[2])  # 中间缺一片
+    for f in _fragments(1, "next"):
+        a.feed(f)
+    assert out == []
+    a.expire(0)  # 超时：丢掉缺片的消息，后面的继续提交
+    assert out == [encode("next")]
 
 
-def test_assembler_reset_discards_pending():
+def test_expire_skips_never_seen_message():
     out = []
     a = UplinkAssembler(out.append)
-    a.feed(_chunk(1, b"stale"))
+    for f in _fragments(1, "next"):
+        a.feed(f)
+    assert out == []
+    a.expire(0)  # 消息 0 一片都没到，直接跳过
+    assert out == [encode("next")]
+
+
+def test_message_drops_duplicate_fragment():
+    # 消息 0 只用来推进 ID；重复片的检查放在消息 1 上（ID 0 重复会被当成新流）。
+    out = []
+    a = UplinkAssembler(out.append)
+    for f in _fragments(0, "hello"):
+        a.feed(f)
+    for f in _fragments(1, "world", size=4):
+        a.feed(f)
+        a.feed(f)  # 同一片重复投递
+    assert out == [encode("hello"), encode("world")]
+
+
+def test_assembler_reset_discards_inflight():
+    out = []
+    a = UplinkAssembler(out.append)
+    a.feed(_chunk(0, 1, b"stale"))
     a.reset()
-    a.feed(_chunk(0, b"fresh"))
-    assert out == [b"fresh"]
+    for f in _fragments(0, "fresh"):
+        a.feed(f)
+    assert out == [encode("fresh")]
 
 
 def test_assembler_rejects_short_chunk():
     a = UplinkAssembler(lambda _: None)
     with pytest.raises(FrameError):
         a.feed(b"\x01")
+
+
+def test_stream_restart_on_message_id_zero():
+    """手机端每条连接从消息 0 开始。收到 0 而已经在等更大的 ID，说明换了流。"""
+    out = []
+    a = UplinkAssembler(out.append)
+    for f in _fragments(0, "old"):
+        a.feed(f)
+    for f in _fragments(1, "old2"):
+        a.feed(f)
+    for f in _fragments(0, "new"):
+        a.feed(f)
+    assert out == [encode("old"), encode("old2"), None, encode("new")]

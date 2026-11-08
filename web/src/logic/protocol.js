@@ -8,7 +8,7 @@ export const DOWNLINK_UUID = '7d9f0003-3c4e-4b6a-9f2e-1a2b3c4d5e6f';
 export const HEARTBEAT_TIMEOUT_MS = 9000;
 // 上行单片线包上限由电脑端下发：ATT 的写 PDU 与通知 PDU 都是「操作码 1＋句柄 2
 // ＋值」，单片上限同为 MTU-3，所以电脑端算它下行分片的那个数就是手机的上限。
-// 电脑端随订阅变化发 `mtu` 消息，手机减去自己的 4 字节序号头就是载荷。
+// 电脑端随订阅变化发 `mtu` 消息，手机减去自己的 4 字节片头就是载荷。
 // 消息到达之前先按 LE 的默认 ATT_MTU 23 算：20 字节在任何链路上都成立。
 export const UPLINK_LIMIT_MIN = 20;
 export const RECONNECT_INTERVAL_MS = 2000;

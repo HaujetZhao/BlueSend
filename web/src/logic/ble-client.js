@@ -58,9 +58,9 @@ export class BleClient {
   // 本轮重连是否已经提示过积压溢出，提示一次就够，免得刷掉真正的连接状态。
   #outboxOverflowNotified = false;
   #connecting = null;
-  // 上行分片序号：连接作用域的连续计数。不能每条消息从 0 数——电脑端重组器
-  // 跨消息只进不退，重新从 0 计数会被当成重复片全部丢弃。
-  #uplinkSeq = 0;
+  // 上行消息 ID：连接内每条消息自增，连接建立时归零。电脑端按 ID 分组收片、
+  // 按 ID 顺序提交；某条消息缺片只会让它自己超时丢弃，不会卡住后面的消息。
+  #messageId = 0;
   // 上行单片线包上限：电脑端按协商出的 MTU 下发（mtu 消息），同样是连接作用域。
   // 收到之前用 ATT 最小 MTU 推出来的 20，任何链路上都写得出去。
   #uplinkLimit = UPLINK_LIMIT_MIN;
@@ -142,7 +142,7 @@ export class BleClient {
       downlink.addEventListener('characteristicvaluechanged', this.#onNotify);
       this.#decoder.reset();
       this.#writeChain = Promise.resolve();
-      this.#uplinkSeq = 0;
+      this.#messageId = 0;
       this.#uplinkLimit = UPLINK_LIMIT_MIN;
       this.#noteAlive();
       this.#stopReconnect();
@@ -250,7 +250,7 @@ export class BleClient {
     this.#outboxOverflowNotified = false;
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
-    this.#uplinkSeq = 0;
+    this.#messageId = 0;
     this.#uplinkLimit = UPLINK_LIMIT_MIN;
     device?.removeEventListener('gattserverdisconnected', this.#onDeviceDisconnect);
     device?.gatt?.disconnect();
@@ -268,23 +268,25 @@ export class BleClient {
   }
 
   async #writeFrame(uplink, frame, generation, onProgress) {
-    // 每片 4 字节大端序号前缀：电脑端写回调跑在线程池上，并发投递的字节顺序
-    // 会颠倒（实测 517 片三轮坏一次），接收端按序号重排。载荷 = 线包上限 - 4。
+    // 每片 4 字节头：2 字节消息 ID + 2 字节片序号。电脑端写回调跑在线程池上，
+    // 并发投递的字节顺序会颠倒（实测 517 片三轮坏一次），接收端按片序号重排；
+    // 消息 ID 让缺片只影响这一条消息。载荷 = 线包上限 - 4。
     const size = this.#uplinkLimit - 4;
     const chunks = Math.ceil(frame.length / size);
-    // 序号取连接作用域的连续计数，跨消息不归零（见字段注释）。
-    const seqBase = this.#uplinkSeq;
-    this.#uplinkSeq += chunks;
+    const msgId = this.#messageId;
+    this.#messageId = (this.#messageId + 1) & 0xffff;
     // 最后一片的应答要等前面所有分片在空中排空（实测约 8 毫秒一片），超时按
     // 片数放宽，余量 3 倍。固定 2 秒会把大消息的收尾误杀成断链。
     const timeoutMs = WRITE_ACK_TIMEOUT_MS + DRAIN_MS_PER_CHUNK * chunks;
-    for (let i = 0, seq = seqBase; i < frame.length; i += size, seq += 1) {
+    for (let i = 0, frag = 0; i < frame.length; i += size, frag += 1) {
       // 链路已经换了或断了，旧队列里的分片不再写。返回值告诉 sendAsync 这一帧作废。
       if (generation !== this.#generation) return false;
       const body = frame.subarray(i, i + size);
       const last = i + size >= frame.length;
       const chunk = new Uint8Array(4 + body.length);
-      new DataView(chunk.buffer).setUint32(0, seq, false);
+      const head = new DataView(chunk.buffer);
+      head.setUint16(0, msgId, false);
+      head.setUint16(2, frag, false);
       chunk.set(body, 4);
       // 中间片用无响应写连续入队，不等应答（停等只有 8 KB/s，这样约 63 KB/s）；
       // 最后一片用带响应写——它的应答到达时前面的片必然已排空，一次拿到整条
@@ -384,7 +386,7 @@ export class BleClient {
     this.#onNet([]);
     this.#decoder.reset();
     this.#writeChain = Promise.resolve();
-    this.#uplinkSeq = 0;
+    this.#messageId = 0;
     this.#uplinkLimit = UPLINK_LIMIT_MIN;
     // 写失败或心跳超时不代表链路已经断了。主动断开，电脑端才能看到会话结束、
     // 清掉它那边的半帧缓冲；否则重连会继续用一条已经失步的流。
