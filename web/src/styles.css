@@ -22,8 +22,13 @@ body {
     radial-gradient(760px 520px at 112% 112%, rgba(168, 85, 247, 0.2), transparent 60%),
     linear-gradient(180deg, #0c0c14, #09090e 70%);
   color: var(--text-color);
-  /* dvh 跟随手机地址栏收缩，地址栏显示时不会多出一条可滚动的空白 */
-  min-height: 100dvh;
+  /* 用 svh（小视口）而不是 dvh。Chrome 在 PWA 启动后的头几百毫秒里会把 vh／dvh／
+     lvh 解析成偏大的值（实测 818px，真实视口 762px，多出的 56px 正是浏览器工具栏
+     的高度），而样式表恰好在这个窗口里被应用，min-height 就被冻结在 818px——之后
+     单位恢复正确也不会重算，页面永远比视口高一截、能上下滚动。svh 取的是小视口，
+     从第一帧起就是正确的 762px。浏览器标签页里它也等于地址栏可见时的可视高度，
+     同样不会多出滚动条。 */
+  min-height: 100svh;
   display: flex;
   justify-content: center;
   align-items: flex-start; /* 靠顶端放置，避开手机键盘 */
@@ -36,7 +41,7 @@ body {
 #app {
   width: 100%;
   /* 减去 body 上下各 20px 内边距，页脚才能贴住视口底部 */
-  min-height: calc(100dvh - 40px);
+  min-height: calc(100svh - 40px);
   display: flex;
   flex-direction: column;
   align-items: center;
