@@ -1,7 +1,12 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+const version = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
+).version;
 
 // PWA 构建配置：用于 GitHub Pages 在线版。
 // 与 vite.config.js（单文件构建，给本地 HTTPS 托管）分开，
@@ -34,6 +39,8 @@ export default defineConfig({
     }),
   ],
   base: './',
+  // 页面版本随电脑端下发的一起参与比对，来源只有 package.json 一处。
+  define: { __APP_VERSION__: JSON.stringify(version) },
   resolve: {
     alias: {
       // 只有这份配置带 VitePWA，虚拟模块 virtual:pwa-register/vue 才存在。

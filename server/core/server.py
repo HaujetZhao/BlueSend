@@ -34,6 +34,7 @@ from .protocol import (
 from .text_input import type_text
 from .tray import Tray
 from .upload_server import start_upload_server
+from .version import app_version
 
 logger = logging.getLogger("ble")
 
@@ -231,6 +232,13 @@ async def serve() -> bool:
             # 就整条连接按 20 字节切。
             on_max_notification_size_changed(client, None)
         if clients:
+            # 版本号是连接作用域的：手机端拿它和自己的版本比对，两端不配套
+            # 时提示更新。协议破坏性变更后，旧页面和新电脑端是连不上的。
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(
+                    notify({"t": "hello", "version": app_version()})
+                )
+            )
             # 上传入口是连接作用域的，每条连接都现算一次；之后的变化由
             # net_watch_loop 负责重发。
             loop.call_soon_threadsafe(

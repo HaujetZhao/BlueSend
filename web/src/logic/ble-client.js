@@ -8,6 +8,7 @@ import {
   WRITE_ACK_TIMEOUT_MS,
 } from './protocol.js';
 import { encodeFrame, FrameDecoder } from './frame-codec.js';
+import { APP_VERSION } from './version.js';
 
 // 写入的 Promise 可能一直挂着（带响应写等不到应答、无响应写在缓冲满时排队），
 // 所以加一道上限；超时后调用方会主动断开链路。超时值可按消息大小放宽。
@@ -351,6 +352,15 @@ export class BleClient {
         break;
       case 'notice':
         this.#emit(message.v);
+        break;
+      case 'hello':
+        // 电脑端每次订阅都会报一次版本。两端版本是独立发布的，不配套时
+        // 提示更新——协议破坏性变更后，旧页面和新电脑端根本连不通。
+        if (message.version !== APP_VERSION) {
+          this.#emit(
+            `版本不一致：电脑端 v${message.version}，网页 v${APP_VERSION}，请刷新网页或更新电脑端`,
+          );
+        }
         break;
       case 'benchend':
         this.#onBench({
