@@ -75,6 +75,36 @@ body {
   fill: currentColor;
 }
 
+/* 语言切换：页脚上方的弱化文字按钮，显示当前语言名 */
+.repo .lang-switch {
+  display: block;
+  margin: 0 auto 8px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #9d8fc2;
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.18s;
+}
+
+.repo .lang-switch:hover { opacity: 1; }
+
+/* 这些元素的行高必须显式给：line-height: normal 会按字体自身的行盒度量取值，
+   中文（约 1.45 倍字号）与拉丁字母（约 1.17 倍）不同，同一字号下切换语言会让
+   元素高度跳 3px 左右，卡片高度也跟着变。1.45 与中文下的自然行高一致。 */
+.status-badge,
+.switch-container,
+.btn-bench,
+.repo .lang-switch,
+.modal-title,
+.modal-actions button {
+  line-height: 1.45;
+}
+
 .card {
   padding: 20px;
   width: 100%;

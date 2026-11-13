@@ -16,13 +16,6 @@ export function randomBenchPayload() {
   return btoa(binary);
 }
 
-// bytes 与 ms 都由发送方计时得到；chunk 是发送时实际使用的单包大小。
-export function describeBench(direction, { bytes, ms, chunk }) {
-  const seconds = ms / 1000;
-  const rate = bytes / seconds / 1024;
-  return `${direction} ${bytes / 1024} KB / ${seconds.toFixed(1)} 秒 = ${rate.toFixed(1)} KB/s（单包 ${chunk} B）`;
-}
-
 // 内容校验：拿收到的载荷重算 SHA-256，与发送方随消息带上的值比对。
 export async function sha256Hex(text) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));

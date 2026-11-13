@@ -13,7 +13,8 @@
     "test": "node --test src/logic/*.test.js"
   },
   "dependencies": {
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "vue-i18n": "^11.4.19"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

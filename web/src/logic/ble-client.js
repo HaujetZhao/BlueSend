@@ -9,6 +9,9 @@ import {
   PROTOCOL_VERSION,
 } from './protocol.js';
 import { encodeFrame, FrameDecoder } from './frame-codec.js';
+import { i18n } from './i18n.js';
+
+const t = (key, params) => i18n.global.t(key, params);
 
 // 写入的 Promise 可能一直挂着（带响应写等不到应答、无响应写在缓冲满时排队），
 // 所以加一道上限；超时后调用方会主动断开链路。超时值可按消息大小放宽。
@@ -154,16 +157,17 @@ export class BleClient {
       this.#connectedAt = Date.now();
       // 「已连接」这条日志兼作探针：电脑端重启后 Chrome 还在用旧 GATT 句柄，
       // 这次写必然失败。写成功才对外宣布连上，写失败就静默丢弃、继续后台重连。
-      // 探针与状态栏用同一句话，电脑端日志和手机事件行能直接对照。
-      const text = `已连接（第 ${this.#dropCount + 1} 次）`;
+      // 写进电脑端日志的文本保持中文（那边日志只有一种语言），界面事件行按
+      // 当前语言翻译，所以两处文案在有英文版时不逐字一致。
+      const logText = `已连接（第 ${this.#dropCount + 1} 次）`;
       try {
-        await this.#queue(this.#link, { t: 'log', v: text }, generation);
+        await this.#queue(this.#link, { t: 'log', v: logText }, generation);
       } catch {
         return;
       }
       if (generation !== this.#generation || this.#disposed) return;
       this.#announced = true;
-      this.#emit(text);
+      this.#emit(t('events.connectedAttempt', { n: this.#dropCount + 1 }));
       this.#flushPendingLogs();
       this.#flushOutbox();
       this.#onState('connected');
@@ -187,7 +191,7 @@ export class BleClient {
         console.warn('重连期间积压消息过多，丢弃最早的一条', dropped);
         if (!this.#outboxOverflowNotified) {
           this.#outboxOverflowNotified = true;
-          this.#emit('重连期间积压消息过多，最早的一条已丢弃');
+          this.#emit(t('events.outboxOverflow'));
         }
       }
       return true;
@@ -366,7 +370,7 @@ export class BleClient {
           // 在线版页面始终从 GitHub Pages 拉最新的，所以不兼容时该升级的
           // 一定是电脑端。
           this.#onWarning(
-            `网页协议 v${PROTOCOL_VERSION}，电脑端协议 v${proto}，请更新电脑端。`,
+            t('events.protocolMismatch', { page: PROTOCOL_VERSION, pc: proto }),
           );
         }
         break;
@@ -416,7 +420,7 @@ export class BleClient {
     // 还没对外宣布连上就断了，说明是后台重连过程中的失败，不刷前台。
     if (this.#announced) {
       this.#announced = false;
-      this.#emit('连接已断开，正在自动重连…');
+      this.#emit(t('events.disconnected'));
       // 物理断开电脑端自己就能看到（订阅清零 + 链路状态：已断开），不必再发；
       // 另外三种原因只有手机知道，攒到重连后补发。
       if (reason !== '物理断开') this.#pendingLogs.push(logText);

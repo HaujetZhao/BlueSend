@@ -1,9 +1,14 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useBle } from './composables/useBle.js';
 import { BENCH_BYTES } from './logic/protocol.js';
-import { describeBench, randomBenchPayload, sha256Hex } from './logic/bench.js';
+import { randomBenchPayload, sha256Hex } from './logic/bench.js';
+import { setLocale } from './logic/i18n.js';
 import { needRefresh, updateServiceWorker } from '@pwa-update';
+
+const { t, locale } = useI18n({ useScope: 'global' });
+const nextLocale = computed(() => (locale.value === 'zh' ? 'en' : 'zh'));
 
 const instantMode = ref(true);
 const text = ref('');
@@ -46,9 +51,7 @@ const {
   },
 });
 
-const statusLabel = computed(
-  () => ({ disconnected: '未连接', connecting: '连接中', connected: '已连接' })[status.value],
-);
+const statusLabel = computed(() => t(`status.${status.value}`));
 // 已授权时探测完全自动，探不到可达入口就把按钮置灰；但置灰只是提示，不阻止
 // 点击——网络可能在两次探测之间恢复，真正可不可达由点击那一刻的探测决定。
 // 没授权时无法探测，按钮同样保持可点，那次点击是触发授权提示的用户手势。
@@ -58,16 +61,16 @@ const canUpload = computed(
     && !uploadBusy.value,
 );
 const placeholder = computed(() => {
-  if (status.value === 'connecting') return '正在重新连接，请稍候…';
+  if (status.value === 'connecting') return t('placeholder.connecting');
   if (status.value === 'connected') {
-    return instantMode.value
-      ? '已启用即时输入，打字实时发到电脑…'
-      : '输入完毕后，点击发送按钮投递…';
+    return instantMode.value ? t('placeholder.instant') : t('placeholder.manual');
   }
-  return hasTriedConnect.value
-    ? '蓝牙已断开，正在后台重连，可以继续在此处打字…'
-    : '连接蓝牙后可开始输入...';
+  return hasTriedConnect.value ? t('placeholder.background') : t('placeholder.idle');
 });
+
+function toggleLocale() {
+  setLocale(nextLocale.value);
+}
 
 watch(status, (state) => {
   if (state !== 'connected') {
@@ -92,7 +95,7 @@ function dismissWarning() {
 
 function connect() {
   if (!navigator.bluetooth) {
-    alert('浏览器不支持 Web Bluetooth，或页面不在 HTTPS 下打开。');
+    alert(t('alerts.noBluetooth'));
     return;
   }
   hasTriedConnect.value = true;
@@ -264,8 +267,8 @@ async function prepareUpload(hosts, generation) {
 function noteUnreachable() {
   note(
     permissionMayBlock()
-      ? '没有入口能连通：请确认手机与电脑在同一局域网，并允许浏览器访问本地网络'
-      : '没有入口能连通，请确认手机与电脑在同一局域网',
+      ? t('upload.unreachablePermission')
+      : t('upload.unreachable'),
   );
 }
 
@@ -275,7 +278,7 @@ function noteUnreachable() {
 async function openUpload() {
   const hosts = uploadLinks.value;
   if (!hosts.length) return;
-  note('正在探测入口…');
+  note(t('upload.probing'));
   // 每次点击都重新探测：网络可能在两次 net 之间断掉，之前探测的结果不可信。
   let url;
   if (uploadPerm.value === 'unsupported' && !pageIsLocal) {
@@ -299,7 +302,7 @@ async function openUpload() {
     location.href = url;
     return;
   }
-  note('已打开上传页');
+  note(t('upload.opened'));
 }
 
 // 用来探测的请求走本机的 /ping，token 原样带上。targetAddressSpace 让 Chrome
@@ -344,19 +347,19 @@ async function pushClipboard() {
   try {
     content = await navigator.clipboard.readText();
   } catch (err) {
-    alert('读取手机剪贴板被浏览器拒绝：' + err.message);
+    alert(t('alerts.clipboardReadDenied', { message: err.message }));
     return;
   }
   if (!content) {
-    alert('手机剪贴板为空！');
+    alert(t('alerts.clipboardEmpty'));
     return;
   }
   try {
     // 等到最后一片的 ATT 应答再宣布成功：send() 只代表进了队列。
     await sendAsync({ t: 'clip', v: content });
-    note(`成功推送剪贴板（${content.length} 字符）`);
+    note(t('clipboard.pushed', { count: String(content.length) }));
   } catch (err) {
-    note('推送剪贴板失败：' + err.message);
+    note(t('clipboard.pushFailed', { message: err.message }));
   }
 }
 
@@ -364,13 +367,27 @@ async function applyPulledClipboard(content) {
   // 成功的标志是写进手机剪贴板，不再把内容塞进输入框。
   try {
     await navigator.clipboard.writeText(content);
-    note(`成功拉取剪贴板（${content.length} 字符）`);
+    note(t('clipboard.pulled', { count: String(content.length) }));
   } catch (err) {
     console.warn('写入手机剪贴板失败', err);
     // 浏览器拒绝写入时保底：放进输入框，内容不至于丢。
     text.value = content;
-    note('手机剪贴板写入失败，内容已放进输入框');
+    note(t('clipboard.writeFailed'));
   }
+}
+
+// 结果行按当前语言拼装。插值一律传字符串：vue-i18n 会对数字做本地化分组
+// （1,234），把「256 KB」的口径弄乱。
+function benchText(directionKey, { bytes, ms, chunk }) {
+  const seconds = ms / 1000;
+  const rate = bytes / seconds / 1024;
+  return t('bench.result', {
+    direction: t(directionKey),
+    kb: String(bytes / 1024),
+    seconds: seconds.toFixed(1),
+    rate: rate.toFixed(1),
+    chunk: String(chunk),
+  });
 }
 
 // 一片一片刷会让事件行闪个不停，节流到 100 毫秒一次。
@@ -392,8 +409,8 @@ function showBenchProgress(received, total) {
   if (percent < 99 && now - benchShownAt < PROGRESS_INTERVAL_MS) return;
   benchShownAt = now;
   lastEvent.value = benchDirection === 'up' && percent >= 99
-    ? '测速中… 99%（等待链路确认）'
-    : `测速中… ${percent}%`;
+    ? t('bench.draining')
+    : t('bench.progress', { percent: String(percent) });
 }
 
 // 下行进度由手机自己从帧头算：电脑端的 notify 返回时只是把数据塞进了发送队列，
@@ -422,7 +439,7 @@ async function benchUplink() {
   const sha256 = await sha256Hex(payload);
   benchStarted = performance.now();
   // 只改事件行，不发 log 消息：日志写在计时窗口之前会污染测量。
-  lastEvent.value = '测速中…';
+  lastEvent.value = t('bench.running');
   try {
     // 单包大小先取：写完再看，链路可能已经断了。
     const chunk = uplinkChunkSize();
@@ -430,14 +447,14 @@ async function benchUplink() {
     // 所以这个耗时就是真实空口时间，不是本地入队时间。
     await sendAsync({ t: 'benchup', v: payload, sha256 }, showBenchProgress);
     note(
-      describeBench('上行', {
+      benchText('bench.up', {
         bytes: BENCH_BYTES,
         ms: performance.now() - benchStarted,
         chunk,
       }),
     );
   } catch (err) {
-    note('上行测速中断：' + err.message);
+    note(t('bench.upInterrupted', { message: err.message }));
   } finally {
     benching.value = false;
   }
@@ -450,14 +467,14 @@ function benchDownlink() {
   benchStarted = 0;
   benchDoneAt = 0;
   benchShownAt = 0;
-  lastEvent.value = '测速中…';
+  lastEvent.value = t('bench.running');
   // 计时只能在手机端做，电脑端只管发数据。
   send({ t: 'benchdown' });
 }
 
 async function showBenchResult({ bytes, chunk, sha256, payload }) {
   benching.value = false;
-  const summary = describeBench('下行', { bytes, ms: benchDoneAt - benchStarted, chunk });
+  const summary = benchText('bench.down', { bytes, ms: benchDoneAt - benchStarted, chunk });
   // 电脑端每次发随机载荷，哈希对不上就是分片被调换、重复或丢了字节。
   // 这种情况帧仍是合法 JSON，长度也对，前面那些检查一律看不出来。
   const actual = await sha256Hex(payload);
@@ -465,7 +482,10 @@ async function showBenchResult({ bytes, chunk, sha256, payload }) {
   note(
     actual === sha256
       ? summary
-      : `${summary} · 内容校验失败（${actual.slice(0, 8)}≠${sha256.slice(0, 8)}）`,
+      : `${summary} · ${t('bench.checksumFailed', {
+        actual: actual.slice(0, 8),
+        expected: sha256.slice(0, 8),
+      })}`,
   );
 }
 
@@ -476,7 +496,7 @@ tabChannel.onmessage = (event) => {
   if (event.data === 'ping') {
     tabChannel.postMessage('here');
   } else {
-    note('检测到另一个标签页也开着本页面，请只保留一个再连接');
+    note(t('events.duplicateTab'));
   }
 };
 tabChannel.postMessage('ping');
@@ -491,14 +511,14 @@ onUnmounted(() => tabChannel.close());
         class="status-badge"
         :class="status"
         :disabled="status === 'connecting'"
-        :aria-label="status === 'connected' ? '重新连接' : '连接蓝牙'"
+        :aria-label="status === 'connected' ? t('status.reconnectAria') : t('status.connectAria')"
         @click="connect"
       >
         {{ statusLabel }}
       </button>
 
       <div class="switch-container">
-        <span>即时发送</span>
+        <span>{{ t('switch.instant') }}</span>
         <label class="switch">
           <input v-model="instantMode" type="checkbox" @change="toggleInstant">
           <span class="slider"></span>
@@ -519,9 +539,9 @@ onUnmounted(() => tabChannel.close());
     ></textarea>
 
     <div v-if="!instantMode" class="button-group">
-      <button class="btn-clear" @click="clearInput">清空</button>
+      <button class="btn-clear" @click="clearInput">{{ t('actions.clear') }}</button>
       <button class="btn-send" :disabled="!connected" @click="sendText">
-        发送
+        {{ t('actions.send') }}
       </button>
     </div>
 
@@ -530,23 +550,23 @@ onUnmounted(() => tabChannel.close());
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 4v14" /><path d="M6 13l6 6 6-6" />
         </svg>
-        拉取剪贴板
+        {{ t('actions.pullClipboard') }}
       </button>
       <button class="btn-push" :disabled="!connected" @pointerdown="rememberInputFocus" @click="pushClipboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 20V6" /><path d="M6 11l6-6 6 6" />
         </svg>
-        推送剪贴板
+        {{ t('actions.pushClipboard') }}
       </button>
     </div>
 
     <div class="bench-group">
       <button class="btn-bench" :disabled="!connected || benching" @click="benchUplink">
-        上行测速
+        {{ t('actions.benchUp') }}
       </button>
       <span class="bench-sep"></span>
       <button class="btn-bench" :disabled="!connected || benching" @click="benchDownlink">
-        下行测速
+        {{ t('actions.benchDown') }}
       </button>
       <span class="bench-sep"></span>
       <button
@@ -555,33 +575,36 @@ onUnmounted(() => tabChannel.close());
         :disabled="!canUpload"
         @click="openUpload"
       >
-        发送文件
+        {{ t('actions.sendFile') }}
       </button>
     </div>
 
     <div class="event-log">
-      {{ lastEvent }}
+      {{ lastEvent || t('events.notConnected') }}
       <button
         v-if="needRefresh"
         class="update-hint"
         @click="updateServiceWorker(true)"
       >
-        有新版本，点击刷新
+        {{ t('actions.refresh') }}
       </button>
     </div>
   </div>
 
   <div v-if="warning" class="modal-mask" role="alertdialog" aria-modal="true">
     <div class="modal">
-      <h2 class="modal-title">版本不兼容</h2>
+      <h2 class="modal-title">{{ t('warning.title') }}</h2>
       <p class="modal-text">{{ warning }}</p>
       <div class="modal-actions">
-        <button @click="dismissWarning">知道了</button>
+        <button @click="dismissWarning">{{ t('actions.dismiss') }}</button>
       </div>
     </div>
   </div>
 
   <footer class="repo">
+    <button class="lang-switch" :aria-label="t('actions.langToggleAria')" @click="toggleLocale">
+      {{ t('localeName') }}
+    </button>
     <a href="https://github.com/HaujetZhao/BlueSend" target="_blank" rel="noopener">
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />

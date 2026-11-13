@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BENCH_BYTES } from './protocol.js';
-import { describeBench, randomBenchPayload, sha256Hex } from './bench.js';
+import { randomBenchPayload, sha256Hex } from './bench.js';
 
 test('随机载荷是定长纯 ASCII', () => {
   // 字符数必须等于字节数，否则「256 KB」的口径两端对不上。
@@ -27,11 +27,4 @@ test('两片互换后哈希就变了', async () => {
   const original = '0123456789abcdef';
   const swapped = '0123456789bacdef';
   assert.notEqual(await sha256Hex(original), await sha256Hex(swapped));
-});
-
-test('结果行含速率与单包大小', () => {
-  assert.equal(
-    describeBench('下行', { bytes: 262144, ms: 3300, chunk: 512 }),
-    '下行 256 KB / 3.3 秒 = 77.6 KB/s（单包 512 B）',
-  );
 });
