@@ -1,3 +1,5 @@
+[English](readme.en.md) | 中文
+
 # BlueSend
 
 通过低功耗蓝牙（BLE），把手机变成电脑的无线输入、剪贴板与文件通道。
@@ -93,7 +95,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 ```powershell
 npm install
 npm run dev        # HTTPS 开发服务器，手机可访问
-npm test           # 帧编解码单测
+npm test           # 帧编解码与词条键一致性单测
 npm run build      # 单文件产物 dist/index.html
 npm run build:pwa  # PWA 产物，供 GitHub Pages 部署
 ```
@@ -121,7 +123,8 @@ uv run pytest
 ├── .github/workflows/      GitHub Actions：构建 PWA 并发布到 Pages
 ├── protocol.md             协议：UUID、帧格式、消息类型
 ├── AGENTS.md               项目说明与开发约定
-└── readme.md
+├── readme.md               对外说明（中文）
+└── readme.en.md            英文说明
 ```
 
 ### 打包 exe

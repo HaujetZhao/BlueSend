@@ -30,13 +30,16 @@
 ```text
 E:\repos\BlueSend\
 ├── AGENTS.md                   本文件：给代理与开发者的项目说明
-├── readme.md                   对外说明
+├── readme.md                   对外说明（中文）
+├── readme.en.md                对外说明（英文）
 ├── protocol.md                 协议的唯一事实来源
 ├── .github/workflows/deploy.yml  GitHub Actions：构建 PWA 并发布到 Pages
 ├── web\                        手机端网页（Vue 3 + Vite）
 │   ├── index.html              Vite 入口
 │   ├── src\App.vue             手机端页面与输入交互
 │   ├── src\styles.css
+│   ├── src\locales\{zh,en}.js  界面词条（键集合必须一致，有单测把关）
+│   ├── src\logic\i18n.js       语言检测、vue-i18n 实例、文档语言同步
 │   ├── src\logic\protocol.js   UUID 与链路参数
 │   ├── src\logic\frame-codec.js 帧编解码
 │   ├── src\logic\ble-client.js 连接、重连、心跳、写队列
@@ -95,6 +98,8 @@ uv run python main.py
 - **本地开发**：在 `web\` 下运行 `npm run dev`，手机打开 `https://<电脑局域网IP>:5173`，首次信任自签证书
 
 连上后点左上角的状态药丸 → 选中电脑。卡片最底下那条状态栏会显示「已连接（第 N 次）」（N 是这条链路第几次连上），同一句话也会作为探针写进电脑端日志；断线时显示「连接已断开，正在自动重连…」，断开原因与存活时长写进手机控制台，其中电脑端看不到的几种还会随重连补发进电脑端日志。剪贴板拉取、推送的结果也报在这一行（带字符数）。
+
+界面支持中英双语：始终按浏览器语言决定（`zh*` 用中文，其余英文）；页脚的「中文 / English」文字按钮显示当前语言，点击可临时切换，只对本次会话生效，刷新后回到系统语言。发往电脑端日志的文本（连接探针、断开诊断）与电脑端下发的 `notice` 保持中文，不随界面语言变化。
 
 前端命令，都在 `web\` 目录下执行：
 
