@@ -30,8 +30,9 @@
     color: var(--text-color);
     min-height: 100dvh;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
     padding: 20px 14px;
     -webkit-tap-highlight-color: transparent;
   }
@@ -192,19 +193,57 @@
   .summary:empty {
     display: none;
   }
+
+  /* 底部的语言开关：与主页面同一套弱化文字按钮 */
+  .footer {
+    margin-top: auto;
+    padding-top: 18px;
+    padding-bottom: env(safe-area-inset-bottom);
+    text-align: center;
+  }
+
+  .lang-switch {
+    display: block;
+    margin: 0 auto;
+    padding: 0;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: #9d8fc2;
+    background: none;
+    border: none;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.18s;
+  }
+
+  .lang-switch:hover { opacity: 1; }
+
+  /* 行高必须显式给：line-height: normal 会按字体自身度量取值，中文与拉丁字母
+     的行盒高度不同，切换语言时元素高度会跳。1.45 与中文下的自然行高一致。 */
+  h1,
+  .target,
+  .pick,
+  .meta,
+  .status,
+  .summary,
+  .footer,
+  .lang-switch {
+    line-height: 1.45;
+  }
 </style>
 </head>
 <body>
 <main>
-  <h1>发送文件到电脑</h1>
+  <h1 data-i18n="title"></h1>
 
   <div class="targets">
-    <button type="button" class="target" data-target="desktop">桌面</button>
-    <button type="button" class="target active" data-target="downloads">下载</button>
+    <button type="button" class="target" data-target="desktop" data-i18n="desktop"></button>
+    <button type="button" class="target active" data-target="downloads" data-i18n="downloads"></button>
   </div>
 
   <label class="pick">
-    选择文件
+    <span data-i18n="pick"></span>
     <input id="picker" type="file" multiple hidden>
   </label>
 
@@ -212,7 +251,81 @@
   <p id="summary" class="summary"></p>
 </main>
 
+<footer class="footer">
+  <button id="lang" class="lang-switch" type="button"></button>
+</footer>
+
 <script>
+  const MESSAGES = {
+    zh: {
+      title: '发送文件到电脑',
+      localeName: '中文',
+      switchAria: '切换语言',
+      desktop: '桌面',
+      downloads: '下载',
+      pick: '选择文件',
+      waiting: '等待中',
+      uploading: '上传中…',
+      uploadingPercent: '上传中 {percent}%',
+      done: '完成',
+      stallFailed: '失败：长时间没有进度',
+      networkFailed: '失败：网络中断',
+      abortedFailed: '失败：传输已中断',
+      failedWith: '失败：{message}',
+      summaryFailed: '已结束：完成 {done} 个，失败 {failed} 个',
+      summaryAll: '全部完成，共 {done} 个文件',
+    },
+    en: {
+      title: 'Send files to PC',
+      localeName: 'English',
+      switchAria: 'Switch language',
+      desktop: 'Desktop',
+      downloads: 'Downloads',
+      pick: 'Choose files',
+      waiting: 'Waiting',
+      uploading: 'Uploading…',
+      uploadingPercent: 'Uploading {percent}%',
+      done: 'Done',
+      stallFailed: 'Failed: no progress for too long',
+      networkFailed: 'Failed: network error',
+      abortedFailed: 'Failed: transfer aborted',
+      failedWith: 'Failed: {message}',
+      summaryFailed: 'Finished: {done} done, {failed} failed',
+      summaryAll: 'All done — {done} file(s)',
+    },
+  };
+
+  // 语言只跟随系统（浏览器语言），底部按钮可临时切换，不持久化。
+  let locale = navigator.languages.some((lang) => lang.toLowerCase().startsWith('zh'))
+    ? 'zh'
+    : 'en';
+
+  function t(key, params = {}) {
+    return MESSAGES[locale][key].replace(
+      /\{(\w+)\}/g,
+      (_, name) => params[name],
+    );
+  }
+
+  const langButton = document.getElementById('lang');
+
+  function applyStatic() {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+    document.title = t('title');
+    for (const el of document.querySelectorAll('[data-i18n]')) {
+      el.textContent = t(el.dataset.i18n);
+    }
+    langButton.textContent = t('localeName');
+    langButton.setAttribute('aria-label', t('switchAria'));
+  }
+
+  langButton.addEventListener('click', () => {
+    locale = locale === 'zh' ? 'en' : 'zh';
+    applyStatic();
+  });
+
+  applyStatic();
+
   const token = new URLSearchParams(location.search).get('t') || '';
   const picker = document.getElementById('picker');
   const list = document.getElementById('list');
@@ -254,8 +367,8 @@
     }
     running = false;
     summary.textContent = failed
-      ? `已结束：完成 ${done} 个，失败 ${failed} 个`
-      : `全部完成，共 ${done} 个文件`;
+      ? t('summaryFailed', { done, failed })
+      : t('summaryAll', { done });
   }
 
   // 半开连接（换 WiFi、电脑睡眠）下 xhr 既不 onload 也不 onerror，队列会永远
@@ -282,7 +395,7 @@
         clearTimeout(timer);
         timer = setTimeout(() => {
           xhr.abort();
-          settle(false, '失败：长时间没有进度');
+          settle(false, t('stallFailed'));
         }, STALL_TIMEOUT_MS);
       }
 
@@ -294,7 +407,7 @@
         pet();
         if (!event.lengthComputable) return;
         const ratio = event.loaded / event.total;
-        setRow(row, ratio, `上传中 ${Math.floor(ratio * 100)}%`);
+        setRow(row, ratio, t('uploadingPercent', { percent: Math.floor(ratio * 100) }));
       };
       xhr.onload = () => {
         let body = {};
@@ -304,14 +417,14 @@
           // 非 JSON 响应只可能是服务端的错误页，按状态码报。
         }
         if (xhr.status === 200 && body.ok) {
-          settle(true, '完成');
+          settle(true, t('done'));
         } else {
-          settle(false, '失败：' + (body.error || 'HTTP ' + xhr.status));
+          settle(false, t('failedWith', { message: body.error || 'HTTP ' + xhr.status }));
         }
       };
-      xhr.onerror = () => settle(false, '失败：网络中断');
-      xhr.onabort = () => settle(false, '失败：传输已中断');
-      setRow(row, 0, '上传中…');
+      xhr.onerror = () => settle(false, t('networkFailed'));
+      xhr.onabort = () => settle(false, t('abortedFailed'));
+      setRow(row, 0, t('uploading'));
       pet();
       xhr.send(file);
     });
@@ -339,7 +452,7 @@
 
     const status = document.createElement('div');
     status.className = 'status';
-    status.textContent = '等待中';
+    status.textContent = t('waiting');
 
     item.append(meta, bar, status);
     list.append(item);
